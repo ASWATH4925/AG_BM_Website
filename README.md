@@ -7,9 +7,10 @@ A React recreation of the AG BlueMetals operations app: a blue metal quarry's we
 - **Dashboard**: tonnage and billing KPIs against the prior day, tonnage by material, credit exposure per account, the vehicles currently on the bridge, latest tickets and account balances (Overview / Yard / Ledger tabs).
 - **Weighbridge station**: live scale reading, tare capture that opens a ticket, weigh-out with net weight, rate-card pricing, loading charge and GST, plus confirm, void and cancel.
 - **Eleven record modules**: Orders, Void Orders, Customers, Materials, Rate Cards, Payments & Credit, Expenses, Employees, Attendance, Advances and Payroll. Each has KPI tiles, search, a status filter, a date range, sortable columns, create/edit/delete dialogs with validation, and running totals.
-- **Profile and sign-in pages** linked from the sidebar account card.
+- **Account page** (`#/profile`): profile header and stats, editable account details, module access, security switches, active sessions, recent activity, and a change-password flow with strength meter and six-digit verification code.
+- **Sign-in page** (`#/login`): split brand panel and glass sign-in card with email/password validation, show-password, remember-me and operator-PIN shortcut. Both pages are recreated from their own reference artifacts.
 
-All data is seeded in the browser (`src/data/seed.js`) and kept in memory, so a page reload restores the seed. The sign-in page is a front-end demo: it checks that both fields are filled, but it does not authenticate, store credentials or call any server.
+All data is seeded in the browser (`src/data/seed.js`) and kept in memory, so a page reload restores the seed. The sign-in and change-password flows are front-end demos: they validate input and simulate the check, but nothing is authenticated, stored or sent to a server. The verification code is shown on screen, as in the reference.
 
 ## Tech stack
 
@@ -27,8 +28,8 @@ src/
   data/seed.js       seed records
   lib/               formatters, pricing/ledger rules, per-module table + form config
   components/        Sidebar, Header, Select, Panel, StatTile, Modal/Toast, …
-  views/             Dashboard, Weighbridge, ListModule, AccountPages
-  styles/            fonts, tokens, components, app layer, shared layout
+  views/             Dashboard, Weighbridge, ListModule, Profile, Login
+  styles/            fonts, tokens, components, app layer, shared layout, page styles (profile, login)
 ```
 
 ## Getting started

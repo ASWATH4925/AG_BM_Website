@@ -7,9 +7,10 @@ import { seedDb } from './data/seed';
 import { createDomain } from './lib/domain';
 import { hhmm, isoDate, M, N, T } from './lib/format';
 import { MODS, moduleConfig } from './lib/modules';
-import { Login, Profile } from './views/AccountPages';
 import Dashboard from './views/Dashboard';
 import ListModule from './views/ListModule';
+import Login from './views/Login';
+import Profile from './views/Profile';
 import Weighbridge from './views/Weighbridge';
 
 const NUMERIC_FIELDS = ['limit', 'rate', 'stock', 'amount', 'salary', 'tare', 'gross', 'days', 'ot', 'recovered', 'received'];
@@ -30,14 +31,22 @@ function initialState() {
   };
 }
 
+// Routes live under "#/…"; other hashes (e.g. the sign-in page's #help) are in-page anchors and keep the current view.
+const routeOf = (hash) => (hash === '#/profile' ? 'profile' : hash === '#/login' ? 'login' : 'app');
+
 function useHashRoute() {
-  const [hash, setHash] = useState(window.location.hash);
+  const [route, setRoute] = useState(() => routeOf(window.location.hash));
   useEffect(() => {
-    const onChange = () => { setHash(window.location.hash); window.scrollTo(0, 0); };
+    const onChange = () => {
+      const h = window.location.hash;
+      if (h && !h.startsWith('#/')) return;
+      setRoute(routeOf(h));
+      window.scrollTo(0, 0);
+    };
     window.addEventListener('hashchange', onChange);
     return () => window.removeEventListener('hashchange', onChange);
   }, []);
-  return hash === '#/profile' ? 'profile' : hash === '#/login' ? 'login' : 'app';
+  return route;
 }
 
 export default function App() {
@@ -252,8 +261,8 @@ export default function App() {
     };
   }
 
-  if (route === 'profile') return <Profile onBack={() => { window.location.hash = '#/'; }} />;
-  if (route === 'login') return <Login onSignIn={() => { window.location.hash = '#/'; go('dashboard'); }} />;
+  if (route === 'profile') return <Profile onSignOut={() => { window.location.hash = '#/login'; }} />;
+  if (route === 'login') return <Login onEnter={() => go('dashboard')} />;
 
   const meta = MODS[s.mod];
   const atStation = s.mod === 'weighbridge' || s.mod === 'dashboard';

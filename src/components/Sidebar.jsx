@@ -93,7 +93,7 @@ export default function Sidebar({ wide, mod, onsiteCount, go }) {
   );
 }
 
-export function Avatar({ size = 34, font = 12.5 }) {
+function Avatar({ size = 34, font = 12.5 }) {
   return (
     <span style={{ position: 'relative', flex: `0 0 ${size}px` }}>
       <span
