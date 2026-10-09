@@ -6,8 +6,9 @@ export const NAV_GROUPS = ['Operations', 'Masters', 'Finance', 'People'];
 export const MODS = {
   dashboard: { label: 'Dashboard', group: 'Operations', title: 'Operations overview', sub: 'Live position across the yard, the ledger and the payroll cycle.' },
   weighbridge: { label: 'Weighbridge', group: 'Operations', title: 'Weighbridge station', sub: 'Capture tare on entry, gross on exit. Net weight and price compute themselves.' },
-  orders: { label: 'Orders', group: 'Operations', title: 'Orders & transactions', sub: 'Every weighed movement, priced from the customer’s rate card.' },
-  voids: { label: 'Void Orders', group: 'Operations', title: 'Void orders', sub: 'Cancelled loads and the loading charges retained against them.' },
+  import: { label: 'Register Import', group: 'Operations', title: 'Register import', sub: 'Load the weighbridge register, check each row and record how it was paid.' },
+  orders: { label: 'Orders', group: 'Operations', title: 'Orders & transactions', sub: 'Every sale, priced at net tons × the rate per ton in force on its date, with how it was paid.' },
+  voids: { label: 'Void Orders', group: 'Operations', title: 'Void orders', sub: 'Cancelled loads and why they were cancelled.' },
   customers: { label: 'Credit Parties', group: 'Masters', title: 'Credit parties', sub: 'Everyone who takes material on credit — owner, address, contact and their own ton rates.' },
   suppliers: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling suppliers', sub: 'Boulder suppliers we buy from and owe money to. Kept apart from credit parties.' },
   materials: { label: 'Materials', group: 'Masters', title: 'Materials', sub: 'What we sell and buy, and the standard rate per ton for each period.' },
@@ -119,24 +120,27 @@ export function moduleConfig(mod, d) {
       only: isVoid ? (o) => o.status === 'Void' : (o) => o.status !== 'Void',
       cols: isVoid
         ? [
-            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.cust(o.custId).name },
+            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.partyLabel(o) },
             { k: '_m', label: 'Material', get: (o) => d.matLabel(o) }, { k: 'vehicle', label: 'Vehicle' }, { k: 'reason', label: 'Reason' },
-            { k: '_lc', label: 'Loading charge', t: 'money', get: () => d.loading() }, { k: 'by', label: 'Voided by' }, { k: 'status', label: 'Status', t: 'tag' },
+            { k: 'by', label: 'Voided by' }, { k: 'status', label: 'Status', t: 'tag' },
           ]
         : [
-            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.cust(o.custId).name },
+            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.partyLabel(o) },
             { k: '_m', label: 'Material', get: (o) => d.matLabel(o) }, { k: 'vehicle', label: 'Vehicle' },
             { k: '_n', label: 'Net (t)', t: 'num2', get: (o) => d.net(o) }, { k: '_r', label: 'Rate / t', t: 'money', get: (o) => d.orderRate(o).rate },
-            { k: '_a', label: 'Amount', t: 'money', get: (o) => d.amount(o) }, { k: 'method', label: 'Method' }, { k: 'status', label: 'Status', t: 'tag' },
+            { k: '_a', label: 'Amount', t: 'money', get: (o) => d.amount(o) },
+            { k: '_p', label: 'Paid', t: 'money', get: (o) => (d.paymentsFor(o.id).length ? d.paidOn(o) : d.onCredit(o) ? 0 : d.amount(o)) },
+            { k: '_oc', label: 'On credit', t: 'money', get: (o) => d.onCredit(o) },
+            { k: 'method', label: 'Payment' }, { k: 'status', label: 'Status', t: 'tag' },
           ],
+      rowAction: isVoid ? undefined : { label: 'Payment', kind: 'pay' },
       fields: [
         { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'custId', label: 'Credit party', type: 'select', options: co(), req: 1 },
         { k: 'matId', label: 'Material', type: 'select', options: so(), req: 1 },
         { k: 'matName', label: 'Material name', hint: 'Only for Other — type what was loaded' },
         { k: 'vehicle', label: 'Vehicle number', req: 1 },
         { k: 'tare', label: 'Tare weight (kg)', type: 'number', req: 1 }, { k: 'gross', label: 'Gross weight (kg)', type: 'number', req: 1 },
-        { k: 'manualRate', label: 'Manual rate (₹ / ton)', type: 'number', hint: 'Leave blank to use the rate card for this date' },
-        { k: 'method', label: 'Payment method', type: 'select', options: opts(['Credit', 'Cash', 'UPI', 'Bank Transfer']) },
+        { k: 'manualRate', label: 'Manual rate (₹ / ton)', type: 'number', hint: 'Leave blank to use the rate card for this date. Payment is recorded after saving.' },
         { k: 'status', label: 'Status', type: 'select', options: opts(['Completed', 'In Transit', 'Void']) },
         { k: 'reason', label: 'Void reason', span: 'span 2', hint: 'Required when the status is Void' },
         { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
@@ -161,7 +165,7 @@ export function moduleConfig(mod, d) {
         ];
       },
       foot: (rows) => (isVoid
-        ? 'Loading charges retained: ' + M(rows.length * d.loading())
+        ? rows.length + ' voided load(s) · ' + T(rows.reduce((s, o) => s + d.net(o), 0)) + ' t'
         : 'Filtered tonnage ' + T(rows.reduce((s, o) => s + d.net(o), 0)) + ' t · value ' + M(rows.reduce((s, o) => s + d.amount(o), 0))),
     };
   }
@@ -283,7 +287,7 @@ export function listKpis(mod, rows, d) {
     orders: () => [
       { label: 'Filtered tonnage', value: T(sum(rows, d.net)) + ' t', note: rows.length + ' tickets' },
       { label: 'Material value', value: M(sum(rows, d.amount)), note: 'Before charges and GST' },
-      { label: 'On credit', value: M(sum(rows.filter((o) => o.method === 'Credit'), d.amount)), note: rows.filter((o) => o.method === 'Credit').length + ' of ' + rows.length + ' tickets' },
+      { label: 'On credit', value: M(sum(rows, d.onCredit)), note: rows.filter((o) => d.onCredit(o) > 0).length + ' of ' + rows.length + ' tickets' },
       { label: 'Open in transit', value: String(rows.filter((o) => o.status === 'In Transit').length), note: 'Awaiting delivery confirmation' },
     ],
     payments: () => [
@@ -293,7 +297,6 @@ export function listKpis(mod, rows, d) {
     ],
     voids: () => [
       { label: 'Voided loads', value: String(rows.length), note: 'Filtered period' },
-      { label: 'Charges retained', value: M(rows.length * d.loading()), note: M(d.loading()) + ' per void' },
       { label: 'Tonnage reversed', value: T(sum(rows, (o) => (o.load || 0) / 1000)) + ' t', note: 'Returned to stock' },
     ],
     expenses: () => [

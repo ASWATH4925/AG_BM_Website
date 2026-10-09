@@ -20,7 +20,7 @@ export default function Dashboard({ d, tab, setTab, go }) {
   const rev = todays.reduce((a, o) => a + d.amount(o), 0);
   const outs = D.customers.reduce((a, c) => a + d.outstanding(c), 0);
   const voids = D.orders.filter((o) => o.status === 'Void').length;
-  const voidLoss = voids * d.loading();
+  const collected = (D.payments || []).filter((p) => p.date === TODAY).reduce((a, p) => a + p.amount, 0);
   const burn = D.expenses.filter((x) => x.type === 'Debit').reduce((a, x) => a + x.amount, 0)
     - D.expenses.filter((x) => x.type === 'Credit').reduce((a, x) => a + x.amount, 0);
   const duePay = D.payroll.filter((p) => p.status !== 'Paid').reduce((a, p) => a + d.payLine(p).net, 0);
@@ -39,13 +39,13 @@ export default function Dashboard({ d, tab, setTab, go }) {
     { label: 'In transit', value: String(D.orders.filter((o) => o.status === 'In Transit').length), note: 'dispatched' },
     { label: 'Payroll due', value: M(duePay), note: 'net of advances' },
     { label: 'Expense burn', value: M(burn), note: 'Sept to date' },
-    { label: 'Void loss', value: M(voidLoss), note: voids + ' voids' },
+    { label: 'Collected today', value: M(collected), note: 'Cash, UPI and account' },
   ];
   const ledgerKpis = [
     { label: 'Outstanding credit', value: M(outs), note: 'Across every account on terms' },
     { label: 'Payroll due', value: M(duePay), note: 'Aug cycle, net of advances' },
     { label: 'Expense burn', value: M(burn), note: 'September to date, net' },
-    { label: 'Void loss', value: M(voidLoss), note: voids + ' voids, charges retained' },
+    { label: 'Voided loads', value: String(voids), note: 'Nothing billed on voids' },
   ];
 
   const owing = D.customers.filter((c) => d.outstanding(c) > 0);

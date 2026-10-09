@@ -1,5 +1,5 @@
-import { settings } from '../config';
 import { isoDate, M } from './format';
+import { isPaidMethod } from './payments';
 
 const OPEN_END = '9999-12-31';
 export const OTHER_MATERIAL = 'M10';
@@ -66,16 +66,20 @@ export function createDomain(db) {
 
   const net = (o) => Math.max(0, (o.gross || 0) - (o.tare || 0)) / 1000;
   const amount = (o) => net(o) * orderRate(o).rate;
-  const loading = () => Number(settings.loadingCharge ?? 1250);
-  const gstPct = () => Number(settings.gstPercent ?? 5);
-  const payable = (o) => {
-    const a = amount(o) + loading();
-    return a + (a * gstPct()) / 100;
+  const partyLabel = (o) => (o.custId ? cust(o.custId).name : (o.walkIn || 'Walk-in') + ' (walk-in)');
+
+  // Payments recorded against a ticket, and what is still on credit after them.
+  const payments = db.payments || [];
+  const paymentsFor = (ticketId) => payments.filter((p) => p.ticketId === ticketId);
+  const paidOn = (o) => paymentsFor(o.id).reduce((s, p) => s + p.amount, 0);
+  const onCredit = (o) => {
+    if (o.status === 'Void' || !o.custId) return 0;
+    const recs = paymentsFor(o.id);
+    if (!recs.length && isPaidMethod(o.method)) return 0;
+    return Math.max(0, amount(o) - paidOn(o) - (+o.roundOff || 0));
   };
-  // Billed = every credit ticket for the party (not void), at the rate in force on its date.
-  const billed = (c) => db.orders
-    .filter((o) => o.custId === c.id && o.method === 'Credit' && o.status !== 'Void')
-    .reduce((s, o) => s + amount(o), 0);
+  // Billed on credit = what each of the party's tickets left on credit, at the rate in force on its date.
+  const billed = (c) => db.orders.filter((o) => o.custId === c.id).reduce((s, o) => s + onCredit(o), 0);
   const outstanding = (c) => Math.max(0, billed(c) - (c.received || 0));
   const hours = (a) => {
     if (!a.in || a.in === '—') return 0;
@@ -99,7 +103,7 @@ export function createDomain(db) {
 
   return {
     db, cust, supplier, mat, emp, salesMaterials, rateFor, orderRate, matLabel,
-    net, amount, loading, gstPct, payable, billed, outstanding, hours, advanceBalance, payLine,
+    net, amount, partyLabel, paymentsFor, paidOn, onCredit, billed, outstanding, hours, advanceBalance, payLine,
   };
 }
 

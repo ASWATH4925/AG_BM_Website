@@ -124,10 +124,43 @@ const onsite = [
   { id: 'S2', ticket: 'WB-24114', vehicle: 'TN 78 AZ 6221', custId: byName('PKV'), matId: 'M06', tare: 4250, load: 8280, inAt: '11:15', method: 'Credit' },
 ];
 
-export const SEED_NEXT_TICKET = 24115;
+// Walk-in sales from the 8 Oct register, paid in cash or into the company account ("ACC P"), with the round-off given.
+const walkIns = [
+  ['WB-24115', '06:59', 'ANNAI', 'M06', 'TN 69 BF 3916', 4390, 8010, 'Cash', 3600, 20],
+  ['WB-24116', '07:55', 'MAYIL', 'M07', 'TN 78 R 7626', 4580, 8120, 'Account', 3890, 4],
+  ['WB-24117', '08:38', 'TATA ACE', 'M06', 'TN 39 CK 6013', 1770, 3370, 'Cash', 1600, 0],
+];
+walkIns.forEach((w, i) => {
+  ord.push({
+    id: 'OW' + i, ticket: w[0], date: '2026-10-08', time: w[1], custId: '', walkIn: w[2], matId: w[3], matName: '', vehicle: w[4], dir: 'OUT',
+    tare: w[5], gross: w[6], manualRate: '', method: w[7], roundOff: w[9], status: 'Completed', reason: '', remarks: '', by: 'Murugan R',
+  });
+});
+const payments = walkIns.map((w, i) => ({
+  id: 'YW' + i, date: '2026-10-08', time: w[1], ticketId: 'OW' + i, custId: '', walkIn: w[2], method: w[7], amount: w[8],
+  toType: 'company', supplierId: '', toName: '', remarks: '', by: 'Murugan R',
+}));
+
+// Soling (boulder) loads from the 22 Aug register, kept exactly as recorded; priced and settled in the soling module.
+const purchases = [
+  ['CR00001', '13:46', 'SKK KARTHI', 'TN28BJ1481', 0, 13110, 28680],
+  ['CR00007', '14:36', 'SARAVANABAVA', 'TN41BD1599', 0, 17300, 48860],
+  ['CR00010', '14:51', 'SR', 'TN85L2226', 0, 16860, 47570],
+].map((r, i) => ({
+  id: 'U' + i, serial: r[0], date: '2026-08-22', time: r[1], supplierId: suppliers.find((p) => p.name === r[2]).id, regName: r[2],
+  vehicle: r[3], tare: r[4], gross: r[5], net: r[6], amount: 0, batchId: '', remarks: '',
+}));
+
+export const SEED_NEXT_TICKET = 24118;
 
 export function seedDb() {
   return JSON.parse(JSON.stringify({
-    customers: cust, suppliers, materials: mats, rates, orders: ord, employees: emp, attendance: att, advances: adv, payroll: pay, expenses: exp, onsite,
+    customers: cust, suppliers, materials: mats, rates, orders: ord, payments, purchases, staging: [], imports: [],
+    employees: emp, attendance: att, advances: adv, payroll: pay, expenses: exp, onsite,
   }));
+}
+
+// Fills in collections added after a browser first saved its data, so older saves keep working.
+export function upgradeDb(db) {
+  return { payments: [], purchases: [], staging: [], imports: [], suppliers: [], ...db };
 }

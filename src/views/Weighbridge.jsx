@@ -5,8 +5,6 @@ import { settings } from '../config';
 import { OTHER_MATERIAL } from '../lib/domain';
 import { M, N, T } from '../lib/format';
 
-const METHODS = ['Cash', 'Credit', 'UPI', 'Bank Transfer'].map((x) => ({ v: x, l: x }));
-
 export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut, onConfirm, onVoid, onCancel }) {
   const D = d.db;
   const sel = wb.outId ? D.onsite.find((x) => x.id === wb.outId) || null : null;
@@ -15,7 +13,7 @@ export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut
     { l: 'Tare', v: sel ? N(sel.tare) + ' kg' : D.onsite.length ? 'Ticket open' : 'On entry', on: !!sel || D.onsite.length > 0 },
     { l: 'Gross', v: sel ? N(scale) + ' kg' : 'On exit', on: !!sel },
     { l: 'Net', v: sel && netKg > 0 ? T(netKg / 1000) + ' t' : '—', on: !!sel && netKg > 0 },
-    { l: 'Value', v: sel && netKg > 0 ? M((netKg / 1000) * d.rateFor(sel.custId, sel.matId).rate + d.loading()) : '—', on: !!sel && netKg > 0 },
+    { l: 'Value', v: sel && netKg > 0 ? M((netKg / 1000) * d.rateFor(sel.custId, sel.matId).rate) : '—', on: !!sel && netKg > 0 },
   ];
   const rate = d.rateFor(wb.custId, wb.matId);
 
@@ -24,7 +22,6 @@ export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut
     const o = { custId: sel.custId, matId: sel.matId, tare: sel.tare, gross: scale };
     const rr = d.rateFor(sel.custId, sel.matId);
     const amt = d.amount(o);
-    const gst = ((amt + d.loading()) * d.gstPct()) / 100;
     out = {
       weights: [
         { label: 'Tare', value: N(sel.tare), unit: 'kg · captured ' + sel.inAt },
@@ -32,13 +29,11 @@ export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut
         { label: 'Net', value: T(d.net(o)), unit: 'tonnes' },
       ],
       lines: [
-        { label: d.cust(sel.custId).name + ' · ' + d.mat(sel.matId).name, value: sel.method || 'Credit' },
-        { label: 'Applied rate (' + rr.src + ')', value: M(rr.rate) + ' / t' },
-        { label: 'Material value', value: M(amt) },
-        { label: 'Loading charge', value: M(d.loading()) },
-        { label: 'GST @ ' + d.gstPct() + '%', value: M(gst) },
+        { label: 'Party', value: d.cust(sel.custId).name },
+        { label: 'Material', value: d.mat(sel.matId).name },
+        { label: 'Rate (' + rr.src + ')', value: rr.rate ? M(rr.rate) + ' / t' : 'Not set' },
       ],
-      total: M(amt + d.loading() + gst),
+      total: M(amt),
     };
   }
 
@@ -97,9 +92,6 @@ export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut
             </Field>
             <Field label="Material">
               <Select label="Material" value={wb.matId} options={d.salesMaterials().filter((m) => m.id !== OTHER_MATERIAL).map((m) => { const r = d.rateFor(wb.custId, m.id).rate; return { v: m.id, l: m.name + (r ? ' · ' + M(r) + '/t' : ' · no rate') }; })} onChange={(v) => setWb({ matId: v })} />
-            </Field>
-            <Field label="Payment method">
-              <Select label="Payment method" value={wb.method} options={METHODS} onChange={(v) => setWb({ method: v })} />
             </Field>
           </div>
 
@@ -165,16 +157,16 @@ export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut
                   </div>
                 ))}
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', padding: 'var(--space-3) 0 0' }}>
-                  <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 16 }}>Net payable</span>
+                  <span style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 16 }}>Bill (net tons × rate)</span>
                   <span className="ag-tabular" style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 22 }}>{out.total}</span>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', marginTop: 'var(--space-4)' }}>
-                  <button type="button" className="btn btn-primary" onClick={onConfirm}>Confirm · complete order</button>
+                  <button type="button" className="btn btn-primary" onClick={onConfirm}>Confirm · record payment</button>
                   <button type="button" className="btn btn-secondary" onClick={onVoid}>Void load</button>
                   <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--color-neutral-700)', marginTop: 'var(--space-3)' }}>
-                  Gross is taken from the live reading at confirmation. Voiding retains the loading charge of {M(d.loading())} and files the ticket under Void Orders.
+                  Gross is taken from the live reading at confirmation, then you record how the load was paid. Voiding files the ticket under Void Orders with nothing billed.
                 </div>
               </div>
             </div>

@@ -1,8 +1,6 @@
-// Yard settings exposed as editable props in the reference design.
+// Yard settings. Bills are net tons × rate per ton — no loading charge or GST.
 export const settings = {
   companyName: 'AG BlueMetals',
-  loadingCharge: 1250, // ₹ per load, retained on voids
-  gstPercent: 5,
   liveScale: true,
 };
 

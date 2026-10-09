@@ -33,7 +33,7 @@ function Info({ label, value }) {
 // One credit party: who they are, their rate periods and their tickets.
 export default function PartyDetail({ d, party, tab, setTab, onBack, onEdit, onAddRate, onEndRate, onDeleteRate, onOpenSuppliers }) {
   const tickets = d.db.orders.filter((o) => o.custId === party.id).sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')));
-  const credit = tickets.filter((o) => o.method === 'Credit' && o.status !== 'Void');
+  const credit = tickets.filter((o) => d.onCredit(o) > 0);
   const supplier = (d.db.suppliers || []).find((p) => p.linkedCustId === party.id);
 
   return (
@@ -75,7 +75,7 @@ export default function PartyDetail({ d, party, tab, setTab, onBack, onEdit, onA
 
       <div className="ag-stagger ag-quad" style={{ marginTop: 'var(--space-6)' }}>
         <StatTile label="Outstanding" value={M(d.outstanding(party))} note="Billed minus received" />
-        <StatTile label="Billed" value={M(d.billed(party))} note={credit.length + ' credit tickets'} />
+        <StatTile label="Billed" value={M(d.billed(party))} note={credit.length + ' tickets with a credit balance'} />
         <StatTile label="Received" value={M(party.received || 0)} note={'Last receipt ' + (party.last || '—')} />
         <StatTile label="Tonnage" value={T(credit.reduce((s, o) => s + d.net(o), 0)) + ' t'} note="On credit tickets" />
       </div>
@@ -99,7 +99,8 @@ export default function PartyDetail({ d, party, tab, setTab, onBack, onEdit, onA
                   <th style={{ cursor: 'default' }}>Date</th><th style={{ cursor: 'default' }}>Ticket</th><th style={{ cursor: 'default' }}>Material</th>
                   <th style={{ cursor: 'default' }}>Vehicle</th><th style={{ textAlign: 'right', cursor: 'default' }}>Net (t)</th>
                   <th style={{ textAlign: 'right', cursor: 'default' }}>Rate / t</th><th style={{ cursor: 'default' }}>Rate from</th>
-                  <th style={{ textAlign: 'right', cursor: 'default' }}>Amount</th><th style={{ cursor: 'default' }}>Method</th><th style={{ cursor: 'default' }}>Status</th>
+                  <th style={{ textAlign: 'right', cursor: 'default' }}>Amount</th><th style={{ textAlign: 'right', cursor: 'default' }}>On credit</th>
+                  <th style={{ cursor: 'default' }}>Payment</th><th style={{ cursor: 'default' }}>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -115,7 +116,8 @@ export default function PartyDetail({ d, party, tab, setTab, onBack, onEdit, onA
                       <td className="ag-tabular" style={{ textAlign: 'right' }}>{M(r.rate)}</td>
                       <td style={{ color: 'var(--color-neutral-700)' }}>{r.src}</td>
                       <td className="ag-tabular" style={{ textAlign: 'right', fontWeight: 600 }}>{M(d.amount(o))}</td>
-                      <td>{o.method}</td>
+                      <td className="ag-tabular" style={{ textAlign: 'right' }}>{M(d.onCredit(o))}</td>
+                      <td>{o.method === 'Account' ? 'Bank / Account' : o.method}</td>
                       <td><Tag>{o.status}</Tag></td>
                     </tr>
                   );

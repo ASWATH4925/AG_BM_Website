@@ -3,7 +3,11 @@ import Header from './components/Header';
 import Modal, { Toast } from './components/Modal';
 import Sidebar from './components/Sidebar';
 import { IDLE_SCALE_KG, settings, TODAY } from './config';
-import { SEED_NEXT_TICKET, seedDb } from './data/seed';
+import PaymentEditor from './components/PaymentEditor';
+import { SEED_NEXT_TICKET, seedDb, upgradeDb } from './data/seed';
+import { checkPay, defaultPay, emptyLine, fromRecords, isPaidMethod, round2, toRecords } from './lib/payments';
+import { matchMaterial, normalName, parseRegister } from './lib/register';
+import RegisterImport, { rowBill, saleStatus, solingStatus } from './views/RegisterImport';
 import { createDomain, OTHER_MATERIAL, periodLabel, planRate } from './lib/domain';
 import { hhmm, isoDate, M, N, T } from './lib/format';
 import { MODS, moduleConfig } from './lib/modules';
@@ -18,7 +22,7 @@ import Weighbridge from './views/Weighbridge';
 const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'salary', 'tare', 'gross', 'days', 'ot', 'recovered', 'received'];
 const FILTERS_CLEAR = { q: '', status: 'All', from: '', to: '', sortK: null };
 const RECEIPT_METHODS = ['Cash', 'UPI', 'Bank Transfer', 'Credit note'].map((x) => ({ v: x, l: x }));
-const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'stdrates'];
+const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'stdrates', 'import'];
 const SIGNED_IN_AS = 'A. Gopalakrishnan';
 
 const isWide = () => window.innerWidth >= 900;
@@ -29,13 +33,13 @@ const nextCode = (list, prefix, width) => {
 
 function initialState() {
   const saved = loadSaved();
-  const db = saved ? saved.db : seedDb();
+  const db = saved ? upgradeDb(saved.db) : seedDb();
   return {
     mod: 'dashboard', dashTab: 'Overview', now: new Date(), partyId: null, partyTab: 'Rates',
     ...FILTERS_CLEAR, sortDir: 1,
-    modal: null, form: {}, errors: {}, toast: null, wide: isWide(),
+    modal: null, form: {}, errors: {}, toast: null, wide: isWide(), payEdit: null,
     scale: IDLE_SCALE_KG, target: IDLE_SCALE_KG,
-    wb: { vehicle: '', custId: db.customers[0] ? db.customers[0].id : '', matId: 'M06', method: 'Credit', outId: null, err: '' },
+    wb: { vehicle: '', custId: db.customers[0] ? db.customers[0].id : '', matId: 'M06', outId: null, err: '' },
     seq: saved ? saved.seq : SEED_NEXT_TICKET,
     db,
   };
@@ -112,7 +116,7 @@ export default function App() {
     const ticket = 'WB-' + s.seq;
     const row = {
       id: 'S' + Date.now(), ticket, vehicle: vehicle.toUpperCase(), custId: wb.custId, matId: wb.matId, tare: s.scale,
-      load: 15000 + Math.round(Math.random() * 5000), inAt: hhmm(), method: wb.method,
+      load: 15000 + Math.round(Math.random() * 5000), inAt: hhmm(),
     };
     set((st) => ({ seq: st.seq + 1, db: { ...st.db, onsite: st.db.onsite.concat([row]) }, wb: { ...st.wb, vehicle: '', err: '' } }));
     toast(ticket + ' opened — tare ' + N(row.tare) + ' kg captured for ' + row.vehicle + '.');
@@ -126,25 +130,19 @@ export default function App() {
   const cancelOut = () => set((st) => ({ wb: { ...st.wb, outId: null }, target: IDLE_SCALE_KG }));
 
   const ticketFromOnsite = (v, patch) => ({
-    id: 'O' + Date.now(), ticket: v.ticket, date: isoDate(), custId: v.custId, matId: v.matId, vehicle: v.vehicle, dir: 'OUT',
-    tare: v.tare, method: v.method || 'Credit', by: 'Murugan R', ...patch,
+    id: 'O' + Date.now(), ticket: v.ticket, date: isoDate(), time: hhmm(), custId: v.custId, matId: v.matId, matName: '', vehicle: v.vehicle, dir: 'OUT',
+    tare: v.tare, manualRate: '', method: 'Credit', roundOff: 0, payRemarks: '', remarks: '', by: 'Murugan R', ...patch,
   });
 
+  // Weigh-out takes the live reading as gross, then asks how the load was paid before the ticket is saved.
   const confirmOut = () => {
     const v = s.db.onsite.find((x) => x.id === s.wb.outId);
     if (!v) return;
     const o = ticketFromOnsite(v, { gross: s.scale, status: 'Completed', reason: '' });
-    const amt = d.amount(o);
-    set((st) => ({
-      db: {
-        ...st.db,
-        orders: [o].concat(st.db.orders),
-        onsite: st.db.onsite.filter((x) => x.id !== v.id),
-      },
-      wb: { ...st.wb, outId: null },
-      target: IDLE_SCALE_KG,
-    }));
-    toast(v.ticket + ' completed — ' + T(d.net(o)) + ' t, ' + M(amt) + ' ' + (o.method === 'Credit' ? 'to account' : 'collected') + '.');
+    openPay({
+      source: 'weighbridge', ticket: o, onsiteId: v.id, bill: d.amount(o), walkIn: false,
+      title: v.ticket + ' — ' + d.cust(v.custId).name, initial: defaultPay(d.amount(o), { walkIn: false, cashSerial: false }),
+    });
   };
 
   const askVoid = () => {
@@ -153,7 +151,7 @@ export default function App() {
     set({
       modal: {
         kind: 'void', id: v.id, title: 'Void ' + v.ticket + '?', kicker: 'Confirm', confirmLabel: 'Void the load',
-        message: 'The load will be filed under Void Orders against ' + d.cust(v.custId).name + ', and the loading charge of ' + M(d.loading()) + ' stays billable. This cannot be undone from the station.',
+        message: 'The load will be filed under Void Orders against ' + d.cust(v.custId).name + ' and nothing is billed. This cannot be undone from the station.',
       },
     });
   };
@@ -166,8 +164,199 @@ export default function App() {
       db: { ...st.db, orders: [o].concat(st.db.orders), onsite: st.db.onsite.filter((x) => x.id !== v.id) },
       wb: { ...st.wb, outId: null }, modal: null, target: IDLE_SCALE_KG,
     }));
-    toast(v.ticket + ' voided. Loading charge ' + M(d.loading()) + ' retained.');
+    toast(v.ticket + ' voided.');
   };
+
+  // ---- payments ----
+  // payEdit = { source: 'weighbridge' | 'ticket' | 'staging', title, sub, bill, walkIn, initial, ...source details }
+  const openPay = (p) => set({
+    payEdit: { sub: 'Net ' + T(d.net(p.ticket || { gross: 0, tare: 0 })) + ' t · bill ' + M(p.bill), ...p },
+  });
+
+  const methodOf = (pay) => (pay.mode === 'Account' ? 'Account' : pay.mode);
+
+  const openTicketPay = (o) => {
+    const recs = d.paymentsFor(o.id);
+    const legacyPaid = !recs.length && isPaidMethod(o.method);
+    const bill = d.amount(o);
+    const method = o.method === 'Bank Transfer' ? 'Account' : o.method;
+    openPay({
+      source: 'ticket', ticket: o, bill, walkIn: !o.custId,
+      title: o.ticket + ' — ' + d.partyLabel(o),
+      initial: legacyPaid ? { mode: method, lines: [emptyLine(method, round2(bill))], roundOff: '', remarks: o.payRemarks || '' } : fromRecords(o, recs),
+    });
+  };
+
+  const savePay = (pay, result) => {
+    const pe = s.payEdit;
+    if (pe.source === 'staging') {
+      set((st) => ({ db: { ...st.db, staging: st.db.staging.map((r) => (r.key === pe.key ? { ...r, pay } : r)) }, payEdit: null }));
+      return;
+    }
+    const ticket = { ...pe.ticket, method: methodOf(pay), roundOff: result.roundOff, payRemarks: String(pay.remarks || '').trim() };
+    const recs = toRecords(pay, ticket, SIGNED_IN_AS);
+    set((st) => {
+      const others = st.db.payments.filter((p) => p.ticketId !== ticket.id);
+      const exists = st.db.orders.some((o) => o.id === ticket.id);
+      return {
+        db: {
+          ...st.db,
+          orders: exists ? st.db.orders.map((o) => (o.id === ticket.id ? ticket : o)) : [ticket].concat(st.db.orders),
+          payments: others.concat(recs),
+          onsite: pe.onsiteId ? st.db.onsite.filter((x) => x.id !== pe.onsiteId) : st.db.onsite,
+        },
+        payEdit: null,
+        ...(pe.source === 'weighbridge' ? { wb: { ...st.wb, outId: null }, target: IDLE_SCALE_KG } : {}),
+      };
+    });
+    const note = result.credit > 0 ? M(result.credit) + ' on credit' : 'fully paid';
+    toast(ticket.ticket + ' saved — ' + M(pe.bill) + ', ' + (result.paid ? M(result.paid) + ' paid, ' : '') + note + '.');
+  };
+
+  // ---- register import ----
+  const matchParty = (name) => {
+    const n = normalName(name);
+    return n ? s.db.customers.find((c) => normalName(c.name) === n) : null;
+  };
+  const matchSupplier = (name) => {
+    const n = normalName(name);
+    return n ? s.db.suppliers.find((p) => normalName(p.name) === n) : null;
+  };
+  const alreadyIn = (row) => s.db.orders.some((o) => (o.serial || o.ticket) === row.serial && o.date === row.date)
+    || s.db.purchases.some((p) => p.serial === row.serial && p.date === row.date);
+
+  const stageRow = (row, batchId) => {
+    const m = matchMaterial(row.material);
+    const key = row.date + '|' + row.serial;
+    const cashSerial = /^CA/i.test(row.serial);
+    if (m.kind === 'soling') {
+      const p = matchSupplier(row.name);
+      return { ...row, key, batchId, kind: 'soling', matId: m.matId, supplierId: p ? p.id : '', dup: alreadyIn(row) };
+    }
+    const party = matchParty(row.name);
+    const staged = {
+      ...row, key, batchId, kind: 'sale', matId: m.matId, matName: m.matName,
+      custId: party ? party.id : '', walkIn: !party && cashSerial ? row.name : '', dup: alreadyIn(row),
+    };
+    const { bill } = rowBill(d, staged);
+    staged.pay = defaultPay(bill, { walkIn: !staged.custId && !!staged.walkIn, cashSerial });
+    return staged;
+  };
+
+  const importFile = async (file) => {
+    try {
+      const parsed = await parseRegister(await file.arrayBuffer());
+      const batch = { id: 'B' + Date.now(), file: file.name, at: new Date().toISOString(), from: parsed.from, to: parsed.to, rows: parsed.rows.length };
+      const existing = new Set(s.db.staging.map((r) => r.key));
+      const rows = parsed.rows.map((r) => stageRow(r, batch.id));
+      // Rows already in the books or already waiting here are left out and only counted.
+      const fresh = rows.filter((r) => !r.dup && !existing.has(r.key));
+      set((st) => ({ db: { ...st.db, staging: st.db.staging.concat(fresh), imports: [batch].concat(st.db.imports) } }));
+      const sales = fresh.filter((r) => r.kind === 'sale').length;
+      const skipped = rows.length - fresh.length;
+      toast(file.name + ': ' + rows.length + ' rows — ' + (fresh.length
+        ? sales + ' sales and ' + (fresh.length - sales) + ' soling loads to check' + (skipped ? ', ' + skipped + ' already imported or pending' : '')
+        : 'all of them were already imported or are pending') + '.');
+    } catch (err) {
+      toast('Could not read ' + file.name + ': ' + err.message);
+    }
+  };
+
+  const patchStaged = (key, patch) => set((st) => ({ db: { ...st.db, staging: st.db.staging.map((r) => (r.key === key ? { ...r, ...patch } : r)) } }));
+
+  const choosePartyForRow = (key, v) => {
+    const row = s.db.staging.find((r) => r.key === key);
+    const cashSerial = /^CA/i.test(row.serial);
+    if (v === '__new') {
+      const exists = matchParty(row.name);
+      const cust = exists || { id: 'N' + Date.now(), code: nextCode(s.db.customers, 'CP-', 3), name: row.name.trim(), owner: '', address: '', contact: '', gst: '', status: 'Active', remarks: 'Added from register import', received: 0, last: '—' };
+      const next = { ...row, custId: cust.id, walkIn: '' };
+      set((st) => ({
+        db: {
+          ...st.db,
+          customers: exists ? st.db.customers : [cust].concat(st.db.customers),
+          staging: st.db.staging.map((r) => (r.key === key ? { ...next, pay: defaultPay(rowBill(d, next).bill, { walkIn: false, cashSerial }) } : r)),
+        },
+      }));
+      toast(cust.name + (exists ? ' is already a credit party — linked.' : ' added as a credit party. Add owner, contact and address on Credit Parties.'));
+      return;
+    }
+    const next = v === '__walkin' ? { ...row, custId: '', walkIn: row.name } : { ...row, custId: v, walkIn: '' };
+    patchStaged(key, { custId: next.custId, walkIn: next.walkIn, pay: defaultPay(rowBill(d, next).bill, { walkIn: !next.custId, cashSerial }) });
+  };
+
+  const chooseSupplierForRow = (key, v) => {
+    const row = s.db.staging.find((r) => r.key === key);
+    if (v === '__new') {
+      const exists = matchSupplier(row.name);
+      const sup = exists || { id: 'N' + Date.now(), code: nextCode(s.db.suppliers, 'SP-', 2), name: row.name.trim(), owner: '', address: '', contact: '', upi: '', linkedCustId: '', status: 'Active', remarks: 'Added from register import' };
+      set((st) => ({
+        db: { ...st.db, suppliers: exists ? st.db.suppliers : [sup].concat(st.db.suppliers), staging: st.db.staging.map((r) => (r.key === key ? { ...r, supplierId: sup.id } : r)) },
+      }));
+      toast(sup.name + (exists ? ' is already a soling supplier — linked.' : ' added as a soling supplier.'));
+      return;
+    }
+    patchStaged(key, { supplierId: v });
+  };
+
+  const editStagedPay = (key) => {
+    const row = s.db.staging.find((r) => r.key === key);
+    const { bill } = rowBill(d, row);
+    openPay({
+      source: 'staging', key, bill, walkIn: !row.custId,
+      ticket: { gross: row.net, tare: 0 },
+      title: row.serial + ' — ' + (row.custId ? d.cust(row.custId).name : row.walkIn + ' (walk-in)'),
+      initial: row.pay || defaultPay(bill, { walkIn: !row.custId, cashSerial: /^CA/i.test(row.serial) }),
+    });
+  };
+
+  const postSales = () => {
+    const ready = s.db.staging.filter((r) => r.kind === 'sale' && saleStatus(d, r).ready);
+    if (!ready.length) return;
+    const orders = [];
+    const payments = [];
+    let credit = 0;
+    let paid = 0;
+    ready.forEach((r, i) => {
+      const b = rowBill(d, r);
+      const tons = r.net / 1000;
+      // The register amount is what was billed: when it differs from the rate card, keep it as a manual rate per ton.
+      const manualRate = r.amount > 0 && (b.mismatch || !b.card.rate) ? round2(r.amount / tons) : '';
+      const result = checkPay(r.pay, b.bill, { walkIn: !r.custId });
+      const o = {
+        id: 'O' + Date.now() + '-' + i, ticket: r.serial, serial: r.serial, date: r.date, time: r.time, custId: r.custId, walkIn: r.custId ? '' : r.walkIn,
+        matId: r.matId, matName: r.matName, vehicle: r.vehicle, dir: 'OUT', tare: r.gross - r.net, gross: r.gross, manualRate,
+        method: methodOf(r.pay), roundOff: result.roundOff, payRemarks: String(r.pay.remarks || '').trim(), regAmount: r.amount, batchId: r.batchId,
+        status: 'Completed', reason: '', remarks: '', by: SIGNED_IN_AS,
+      };
+      orders.push(o);
+      payments.push(...toRecords(r.pay, o, SIGNED_IN_AS).map((p, j) => ({ ...p, id: p.id + '-' + i + '-' + j })));
+      credit += result.credit;
+      paid += result.paid;
+    });
+    const keys = new Set(ready.map((r) => r.key));
+    set((st) => ({
+      db: { ...st.db, orders: orders.concat(st.db.orders), payments: st.db.payments.concat(payments), staging: st.db.staging.filter((r) => !keys.has(r.key)) },
+    }));
+    toast(ready.length + ' sale(s) posted — ' + M(paid) + ' collected, ' + M(credit) + ' on credit.');
+  };
+
+  const postSoling = () => {
+    const ready = s.db.staging.filter((r) => r.kind === 'soling' && solingStatus(r).ready);
+    if (!ready.length) return;
+    const recs = ready.map((r, i) => ({
+      id: 'U' + Date.now() + '-' + i, serial: r.serial, date: r.date, time: r.time, supplierId: r.supplierId, regName: r.name,
+      vehicle: r.vehicle, tare: r.tare, gross: r.gross, net: r.net, amount: r.amount, batchId: r.batchId, remarks: '',
+    }));
+    const keys = new Set(ready.map((r) => r.key));
+    set((st) => ({ db: { ...st.db, purchases: recs.concat(st.db.purchases), staging: st.db.staging.filter((r) => !keys.has(r.key)) } }));
+    toast(ready.length + ' soling load(s) saved for the soling ledger.');
+  };
+
+  const removeStaged = (key) => set((st) => ({ db: { ...st.db, staging: st.db.staging.filter((r) => r.key !== key) } }));
+  const clearStaged = () => set({
+    modal: { kind: 'clearStaging', title: 'Clear all pending rows?', kicker: 'Register import', confirmLabel: 'Clear', message: 'Rows not yet posted are removed. You can load the register again later.' },
+  });
 
   // ---- list modules ----
   const cfgOf = (mod) => (mod && !DETAIL_VIEWS.includes(mod) ? moduleConfig(mod, d) : null);
@@ -300,6 +489,7 @@ export default function App() {
     else if (kind === 'stdrates') set({ mod: 'stdrates', modal: null });
     else if (kind === 'receipt') openReceipt(row);
     else if (kind === 'reinstate') reinstate(row);
+    else if (kind === 'pay') openTicketPay(row);
   };
 
   const postReceipt = () => {
@@ -328,21 +518,26 @@ export default function App() {
     const rec = { ...f };
     Object.keys(rec).forEach((k) => { if (typeof rec[k] === 'string') rec[k] = rec[k].trim(); });
     NUMERIC_FIELDS.forEach((k) => { if (rec[k] !== undefined && rec[k] !== '') rec[k] = +rec[k]; });
+    // A new manual order is saved on credit, then the payment dialog opens so staff record how it was paid.
+    const newOrder = c.key === 'orders' && !m.id
+      ? { id: 'N' + Date.now(), ticket: 'WB-' + s.seq, dir: 'OUT', time: hhmm(), by: SIGNED_IN_AS, method: 'Credit', roundOff: 0, payRemarks: '', walkIn: '', ...rec }
+      : null;
     set((st) => {
       const list = st.db[c.key] || [];
       if (m.id) return { db: { ...st.db, [c.key]: list.map((r) => (r.id === m.id ? { ...r, ...rec } : r)) }, modal: null };
-      const extra = c.key === 'orders' ? { ticket: 'WB-' + st.seq, dir: 'OUT', time: hhmm(), by: SIGNED_IN_AS }
-        : c.key === 'customers' ? { code: nextCode(list, 'CP-', 3), received: 0, last: '—' }
-          : c.key === 'suppliers' ? { code: nextCode(list, 'SP-', 2) }
-            : c.key === 'materials' ? { code: 'MT-' + String(list.length + 1).padStart(2, '0'), unit: 'Ton' }
-              : c.key === 'employees' ? { code: 'EM-' + String(list.length + 1).padStart(2, '0') } : {};
-      return {
-        db: { ...st.db, [c.key]: [{ id: 'N' + Date.now(), ...extra, ...rec }].concat(list) },
-        modal: null,
-        seq: c.key === 'orders' ? st.seq + 1 : st.seq,
-      };
+      if (newOrder) return { db: { ...st.db, orders: [newOrder].concat(list) }, modal: null, seq: st.seq + 1 };
+      const extra = c.key === 'customers' ? { code: nextCode(list, 'CP-', 3), received: 0, last: '—' }
+        : c.key === 'suppliers' ? { code: nextCode(list, 'SP-', 2) }
+          : c.key === 'materials' ? { code: 'MT-' + String(list.length + 1).padStart(2, '0'), unit: 'Ton' }
+            : c.key === 'employees' ? { code: 'EM-' + String(list.length + 1).padStart(2, '0') } : {};
+      return { db: { ...st.db, [c.key]: [{ id: 'N' + Date.now(), ...extra, ...rec }].concat(list) }, modal: null };
     });
-    toast(m.id ? (rec.name || 'Record') + ' updated.' : (rec.name || 'Record') + ' created.');
+    if (newOrder && newOrder.status !== 'Void') {
+      const bill = d.amount(newOrder);
+      openPay({ source: 'ticket', ticket: newOrder, bill, walkIn: false, title: newOrder.ticket + ' — ' + d.cust(newOrder.custId).name, initial: defaultPay(bill, { walkIn: false, cashSerial: false }) });
+      return;
+    }
+    toast(m.id ? (rec.name || rec.ticket || 'Record') + ' updated.' : (rec.name || (newOrder && newOrder.ticket) || 'Record') + ' created.');
   };
 
   const reinstate = (o) => {
@@ -386,6 +581,7 @@ export default function App() {
       calcLines: formCfg && formCfg.calc ? formCfg.calc(s.form) : null,
       onConfirm: {
         delete: doDelete, void: doVoid, receipt: postReceipt, rate: saveRate, endRate, deleteRate,
+        clearStaging: () => { set((st) => ({ db: { ...st.db, staging: [] }, modal: null })); toast('Pending rows cleared.'); },
       }[m.kind] || save,
       onClose: closeModal,
     };
@@ -397,7 +593,7 @@ export default function App() {
   const meta = party
     ? { ...MODS.party, title: party.name, sub: [party.owner && 'Owner ' + party.owner, party.contact, party.address].filter(Boolean).join(' · ') || 'Credit party — add owner, contact and address with Edit details.' }
     : MODS[s.mod] || MODS.dashboard;
-  const atStation = s.mod === 'weighbridge' || s.mod === 'dashboard';
+  const atStation = s.mod === 'weighbridge' || s.mod === 'dashboard' || s.mod === 'import';
   const onRates = s.mod === 'party' || s.mod === 'stdrates';
   const filters = { q: s.q, status: s.status, from: s.from, to: s.to, sortK: s.sortK, sortDir: s.sortDir };
   const tonsToday = s.db.orders.filter((o) => o.status !== 'Void' && o.date === TODAY).reduce((a, o) => a + d.net(o), 0);
@@ -443,6 +639,19 @@ export default function App() {
                 <button type="button" className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }} onClick={() => go('customers')}>All credit parties</button>
               </div>
             )}
+            {s.mod === 'import' && (
+              <RegisterImport
+                d={d}
+                onFile={importFile}
+                onParty={choosePartyForRow}
+                onSupplier={chooseSupplierForRow}
+                onEditPay={editStagedPay}
+                onRemove={removeStaged}
+                onPostSales={postSales}
+                onPostSoling={postSoling}
+                onClear={clearStaged}
+              />
+            )}
             {s.mod === 'stdrates' && (
               <StandardRates d={d} onBack={() => go('materials')} onAddRate={(matId) => openRate('', matId)} onEndRate={askEndRate} onDeleteRate={askDeleteRate} />
             )}
@@ -477,6 +686,19 @@ export default function App() {
       </div>
 
       {modalProps && <Modal {...modalProps} />}
+      {s.payEdit && (
+        <PaymentEditor
+          key={s.payEdit.title}
+          title={s.payEdit.title}
+          sub={s.payEdit.sub}
+          bill={s.payEdit.bill}
+          walkIn={s.payEdit.walkIn}
+          initial={s.payEdit.initial}
+          suppliers={s.db.suppliers.filter((p) => p.status !== 'Inactive')}
+          onSave={savePay}
+          onClose={() => set({ payEdit: null })}
+        />
+      )}
       <Toast message={s.toast} />
     </div>
   );
