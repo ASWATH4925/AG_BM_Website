@@ -6,11 +6,14 @@ A React recreation of the AG BlueMetals operations app: a blue metal quarry's we
 
 - **Dashboard**: tonnage and billing KPIs against the prior day, tonnage by material, credit exposure per account, the vehicles currently on the bridge, latest tickets and account balances (Overview / Yard / Ledger tabs).
 - **Weighbridge station**: live scale reading, tare capture that opens a ticket, weigh-out with net weight, rate-card pricing, loading charge and GST, plus confirm, void and cancel.
-- **Eleven record modules**: Orders, Void Orders, Customers, Materials, Rate Cards, Payments & Credit, Expenses, Employees, Attendance, Advances and Payroll. Each has KPI tiles, search, a status filter, a date range, sortable columns, create/edit/delete dialogs with validation, and running totals.
+- **Credit parties**: everyone who takes material on credit, with owner name, address, contact and remarks. Each party has its own page with rate cards and tickets.
+- **Soling suppliers**: boulder suppliers we buy from (we owe them), kept apart from credit parties; a supplier can be linked to a credit party when it is the same person, but the accounts stay separate.
+- **Materials and rates**: Aggregate 1/4, 1/2, 3/4, Over, 1 1/2, M-Sand, P-Sand, Dust, Wedmix and Other (name and rate typed per ticket); Soling is purchase-only. Every rate is per ton and has a start date and optional end date. A party rate overrides the standard rate on its dates; amounts are always net tons × rate.
+- **Record modules**: Orders, Void Orders, Payments & Credit, Expenses, Employees, Attendance, Advances and Payroll, each with KPI tiles, search, filters, sortable columns, create/edit/delete dialogs with validation, and running totals.
 - **Account page** (`#/profile`): profile header and stats, editable account details, module access, security switches, active sessions, recent activity, and a change-password flow with strength meter and six-digit verification code.
 - **Sign-in page** (`#/login`): split brand panel and glass sign-in card with email/password validation, show-password, remember-me and operator-PIN shortcut. Both pages are recreated from their own reference artifacts.
 
-All data is seeded in the browser (`src/data/seed.js`) and kept in memory, so a page reload restores the seed. The sign-in and change-password flows are front-end demos: they validate input and simulate the check, but nothing is authenticated, stored or sent to a server. The verification code is shown on screen, as in the reference.
+Data starts from the parties, rates and tickets in the 22 Aug and 8 Oct 2026 registers (`src/data/seed.js`) and every change is saved in this browser (localStorage key `agbm.db.v2`), so it survives a reload but is not shared between computers yet. Clearing the site data in the browser restores the starting data. The sign-in and change-password flows are front-end demos: they validate input and simulate the check, but nothing is authenticated, stored or sent to a server. The verification code is shown on screen, as in the reference.
 
 ## Tech stack
 

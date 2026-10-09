@@ -48,13 +48,13 @@ function Cell({ r, col }) {
   return <td style={style}>{v}</td>;
 }
 
-export default function ListModule({ mod, d, f, setF, onAdd, onEdit, onDelete, onReceipt, onReinstate }) {
+export default function ListModule({ mod, d, f, setF, onAdd, onEdit, onDelete, onRowAction }) {
   const c = moduleConfig(mod, d);
   const meta = MODS[mod];
   const rows = filterRows(c, f, d.db);
   const all = c.only ? (d.db[c.key] || []).filter(c.only) : d.db[c.key] || [];
   const kpis = listKpis(mod, rows, d);
-  const rowAction = mod === 'voids' ? { label: 'Reinstate', run: onReinstate } : c.rowAction ? { label: c.rowAction, run: onReceipt } : null;
+  const rowAction = mod === 'voids' ? { label: 'Reinstate', kind: 'reinstate' } : c.rowAction || null;
 
   const sortBy = (k) => setF((s) => ({ sortK: k, sortDir: s.sortK === k ? -s.sortDir : 1 }));
 
@@ -127,7 +127,7 @@ export default function ListModule({ mod, d, f, setF, onAdd, onEdit, onDelete, o
                 <tr key={r.id}>
                   {c.cols.map((col) => <Cell key={col.k} r={r} col={col} />)}
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {rowAction && <button type="button" className="btn btn-ghost" onClick={() => rowAction.run(r)}>{rowAction.label}</button>}
+                    {rowAction && <button type="button" className="btn btn-ghost" onClick={() => onRowAction(rowAction.kind, r)}>{rowAction.label}</button>}
                     <button type="button" className="btn btn-ghost" onClick={() => onEdit(r)}>Edit</button>
                     <button type="button" className="btn btn-ghost" onClick={() => onDelete(r)}>Delete</button>
                   </td>

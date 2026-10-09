@@ -1,55 +1,71 @@
-// Seed records for the yard: accounts, products, rate cards, tickets, staff and ledger entries.
+// Seed records for the yard. Parties, materials, rates and tickets are taken from the 22 Aug and 8 Oct 2026 registers;
+// staff, attendance, advances, payroll and expenses are demo entries.
 
+// Credit parties (they owe us). Owner, address and contact are filled in by the office.
 const cust = [
-  { id: 'C01', code: 'CU-1041', name: 'Sree Constructions', city: 'Hosur', phone: '98430 22417', gst: '33AAECS1234K1Z9', limit: 500000, invoiced: 1284500, received: 1066100, last: '2026-09-04', status: 'Active' },
-  { id: 'C02', code: 'CU-1042', name: 'L&T Site 4', city: 'Krishnagiri', phone: '99406 71180', gst: '33AAACL0140P1ZQ', limit: 1200000, invoiced: 3162000, received: 2697000, last: '2026-09-07', status: 'Active' },
-  { id: 'C03', code: 'CU-1043', name: 'Nandi Infra', city: 'Bengaluru', phone: '90080 44512', gst: '29AAFCN9921R1ZK', limit: 300000, invoiced: 742000, received: 742000, last: '2026-09-01', status: 'Active' },
-  { id: 'C04', code: 'CU-1044', name: 'Raghav Builders', city: 'Dharmapuri', phone: '94434 90271', gst: '33AAGFR5510M1Z2', limit: 250000, invoiced: 588400, received: 495650, last: '2026-08-22', status: 'On hold' },
-  { id: 'C05', code: 'CU-1045', name: 'VRS Ready Mix', city: 'Hosur', phone: '98942 13360', gst: '33AABCV7781L1ZH', limit: 800000, invoiced: 2410800, received: 2069600, last: '2026-09-06', status: 'Active' },
-  { id: 'C06', code: 'CU-1046', name: 'Ambica Concrete', city: 'Salem', phone: '97910 55842', gst: '33AACCA3345D1ZP', limit: 400000, invoiced: 906300, received: 848300, last: '2026-09-05', status: 'Active' }
-];
-const mats = [
-  { id: 'M01', code: 'MT-20J', name: '20mm Jelly', unit: 'Tonne', rate: 680, stock: 1840, status: 'Active' },
-  { id: 'M02', code: 'MT-12J', name: '12mm Jelly', unit: 'Tonne', rate: 720, stock: 960, status: 'Active' },
-  { id: 'M03', code: 'MT-40B', name: '40mm Blue Metal', unit: 'Tonne', rate: 610, stock: 2410, status: 'Active' },
-  { id: 'M04', code: 'MT-MSD', name: 'M-Sand', unit: 'Tonne', rate: 950, stock: 640, status: 'Active' },
-  { id: 'M05', code: 'MT-PSD', name: 'P-Sand', unit: 'Tonne', rate: 1010, stock: 285, status: 'Active' },
-  { id: 'M06', code: 'MT-QDT', name: 'Quarry Dust', unit: 'Tonne', rate: 340, stock: 3120, status: 'Active' },
-  { id: 'M07', code: 'MT-GSB', name: 'GSB Grade 1', unit: 'Tonne', rate: 520, stock: 1275, status: 'Active' },
-  { id: 'M08', code: 'MT-WMM', name: 'WMM', unit: 'Tonne', rate: 560, stock: 0, status: 'Paused' }
-];
-const rates = [
-  { id: 'R01', custId: 'C02', matId: 'M01', rate: 648, from: '2026-07-01', by: 'A. Gopalakrishnan' },
-  { id: 'R02', custId: 'C02', matId: 'M03', rate: 582, from: '2026-07-01', by: 'A. Gopalakrishnan' },
-  { id: 'R03', custId: 'C05', matId: 'M04', rate: 905, from: '2026-08-01', by: 'A. Gopalakrishnan' },
-  { id: 'R04', custId: 'C05', matId: 'M01', rate: 662, from: '2026-08-01', by: 'Anitha P' },
-  { id: 'R05', custId: 'C01', matId: 'M06', rate: 315, from: '2026-06-15', by: 'Anitha P' },
-  { id: 'R06', custId: 'C03', matId: 'M02', rate: 735, from: '2026-09-01', by: 'A. Gopalakrishnan' },
-  { id: 'R07', custId: 'C06', matId: 'M07', rate: 498, from: '2026-08-18', by: 'Anitha P' }
-];
-const ord = [
-  ['WB-24118', '2026-09-09', 'C02', 'M01', 'TN 29 BX 4412', 'OUT', 14180, 32460, 'Credit', 'Completed'],
-  ['WB-24117', '2026-09-09', 'C05', 'M04', 'KA 05 AH 9087', 'OUT', 12920, 29140, 'UPI', 'Completed'],
-  ['WB-24116', '2026-09-09', 'C01', 'M06', 'TN 70 Z 3321', 'OUT', 13640, 34980, 'Cash', 'Completed'],
-  ['WB-24115', '2026-09-09', 'C06', 'M07', 'TN 29 CD 7756', 'OUT', 14020, 31880, 'Credit', 'In Transit'],
-  ['WB-24114', '2026-09-08', 'C02', 'M03', 'AP 39 TB 1204', 'OUT', 14400, 35120, 'Credit', 'Completed'],
-  ['WB-24113', '2026-09-08', 'C04', 'M01', 'TN 29 BX 4412', 'OUT', 14180, 30720, 'Credit', 'Void'],
-  ['WB-24112', '2026-09-08', 'C03', 'M02', 'KA 05 AH 9087', 'OUT', 12920, 28640, 'Bank Transfer', 'Completed'],
-  ['WB-24111', '2026-09-08', 'C05', 'M01', 'TN 70 Z 3321', 'OUT', 13640, 33260, 'Credit', 'Completed'],
-  ['WB-24110', '2026-09-07', 'C01', 'M04', 'TN 29 CD 7756', 'OUT', 14020, 32900, 'Cash', 'Completed'],
-  ['WB-24109', '2026-09-07', 'C02', 'M01', 'AP 39 TB 1204', 'OUT', 14400, 36180, 'Credit', 'Completed'],
-  ['WB-24108', '2026-09-07', 'C06', 'M06', 'TN 29 BX 4412', 'OUT', 14180, 29980, 'UPI', 'Completed'],
-  ['WB-24107', '2026-09-06', 'C05', 'M04', 'KA 05 AH 9087', 'OUT', 12920, 30240, 'Credit', 'Completed'],
-  ['WB-24106', '2026-09-06', 'C04', 'M03', 'TN 70 Z 3321', 'OUT', 13640, 31460, 'Cash', 'Void'],
-  ['WB-24105', '2026-09-05', 'C03', 'M07', 'TN 29 CD 7756', 'OUT', 14020, 33740, 'Bank Transfer', 'Completed'],
-  ['WB-24104', '2026-09-05', 'C02', 'M01', 'AP 39 TB 1204', 'OUT', 14400, 37020, 'Credit', 'Completed'],
-  ['WB-24103', '2026-09-04', 'C01', 'M02', 'TN 29 BX 4412', 'OUT', 14180, 32180, 'Credit', 'Completed']
-].map((r, i) => ({
-  id: 'O' + i, ticket: r[0], date: r[1], custId: r[2], matId: r[3], vehicle: r[4], dir: r[5],
-  tare: r[6], gross: r[7], method: r[8], status: r[9],
-  reason: r[9] === 'Void' ? (i === 5 ? 'Wrong material loaded' : 'Customer cancelled at gate') : '',
-  by: 'Murugan R'
+  'AJITH', 'CASTLE STONE 1', 'DKR 1', 'DR', 'EKM MURUGAN', 'GOKILA MANI 1', 'GP', 'KK', 'LAKSHMI', 'MANI V.MURUGAN',
+  'MATHAN', 'OG', 'PKV', 'RMS KUMAR', 'RNP', 'SAMPATH', 'SELVAMAYIL', 'SIVA WORKSHOP', 'SKS', 'TIRUPATHI',
+].map((name, i) => ({
+  id: 'C' + String(i + 1).padStart(2, '0'), code: 'CP-' + String(i + 1).padStart(3, '0'), name,
+  owner: '', address: '', contact: '', gst: '', status: 'Active', remarks: '', received: 0, last: '—',
 }));
+
+// Soling (boulder) suppliers (we owe them). Kept apart from credit parties.
+const suppliers = ['SKK KARTHI', 'SARAVANABAVA', 'SR'].map((name, i) => ({
+  id: 'P' + String(i + 1).padStart(2, '0'), code: 'SP-' + String(i + 1).padStart(2, '0'), name,
+  owner: '', address: '', contact: '', upi: '', linkedCustId: '', status: 'Active', remarks: '',
+}));
+
+// Materials. Everything is priced per ton; "Other" takes a name typed on the ticket; soling is bought, never sold.
+const mats = [
+  ['M01', 'AG-14', 'Aggregate 1/4', 'Aggregate'],
+  ['M02', 'AG-12', 'Aggregate 1/2', 'Aggregate'],
+  ['M03', 'AG-34', 'Aggregate 3/4', 'Aggregate'],
+  ['M04', 'AG-OV', 'Aggregate Over', 'Aggregate'],
+  ['M05', 'AG-112', 'Aggregate 1 1/2', 'Aggregate'],
+  ['M06', 'MS', 'M-Sand', 'Sand'],
+  ['M07', 'PS', 'P-Sand', 'Sand'],
+  ['M08', 'DU', 'Dust', 'Dust'],
+  ['M09', 'WM', 'Wedmix', 'Wedmix'],
+  ['M10', 'OT', 'Other', 'Other'],
+  ['M20', 'SO', 'Soling (boulder)', 'Purchase'],
+].map(([id, code, name, group]) => ({ id, code, name, group, unit: 'Ton', kind: group === 'Purchase' ? 'purchase' : 'sale', status: 'Active' }));
+
+// Rate cards, ₹ per ton. custId '' = standard rate; a party card overrides it for its period.
+// Values are read off the bills in the two registers; period start dates are placeholders to adjust.
+let rid = 0;
+const card = (custId, matId, rate, from, to, remarks) => ({ id: 'R' + String(++rid).padStart(3, '0'), custId, matId, rate, from, to, remarks, by: 'A. Gopalakrishnan' });
+const rates = [
+  ...[['M06', 1100], ['M07', 1200], ['M01', 900], ['M03', 900], ['M05', 900]]
+    .map(([m, r]) => card('', m, r, '2026-08-01', '2026-09-30', 'Read from the 22 Aug 2026 register')),
+  ...[['M06', 1000], ['M07', 1100], ['M01', 800], ['M02', 800], ['M03', 800], ['M05', 800]]
+    .map(([m, r]) => card('', m, r, '2026-10-01', '', 'Read from the 8 Oct 2026 register')),
+  card('C10', 'M01', 750, '2026-10-01', '', 'Party rate seen on the 8 Oct register'),
+  card('C04', 'M06', 950, '2026-10-01', '', 'Party rate seen on the 8 Oct register'),
+];
+
+// Credit tickets from the registers: [ticket, date, time, party, material, vehicle, tare kg, gross kg]
+const byName = (n) => cust.find((c) => c.name === n).id;
+const ord = [
+  ['WB-24112', '2026-10-08', '08:35', 'TIRUPATHI', 'M03', 'TN 78 AY 4114', 4340, 11550],
+  ['WB-24111', '2026-10-08', '08:32', 'DR', 'M06', 'TN 78 MC 8339', 4820, 13360],
+  ['WB-24110', '2026-10-08', '08:10', 'OG', 'M01', 'TN 78 MB 0972', 4360, 12070],
+  ['WB-24109', '2026-10-08', '07:57', 'PKV', 'M06', 'TN 78 AZ 6221', 4250, 12450],
+  ['WB-24108', '2026-10-08', '07:50', 'MANI V.MURUGAN', 'M01', 'TN 32 J 3355', 8380, 22550],
+  ['WB-24107', '2026-10-08', '07:37', 'SKS', 'M02', 'TN 78 MA 5806', 4320, 13790],
+  ['WB-24106', '2026-10-08', '07:36', 'GOKILA MANI 1', 'M05', 'TN 75 B 6233', 4720, 12070],
+  ['WB-24105', '2026-10-08', '07:19', 'DKR 1', 'M07', 'TN 78 MA 6498', 4380, 11800],
+  ['WB-24104', '2026-10-08', '07:13', 'PKV', 'M06', 'TN 78 AZ 6221', 4250, 12530],
+  ['WB-24103', '2026-10-08', '06:30', 'RMS KUMAR', 'M06', 'TN 78 MA 1611', 4670, 12550],
+  ['WB-24102', '2026-10-08', '06:19', 'LAKSHMI', 'M07', 'TN 88 U 1068', 4260, 11460],
+  ['WB-24101', '2026-10-08', '04:55', 'SELVAMAYIL', 'M06', 'TN 42 0823', 7520, 23780],
+  ['CR00005', '2026-08-22', '14:31', 'MANI V.MURUGAN', 'M07', 'TN19 9004', 4500, 10270],
+  ['CR00004', '2026-08-22', '14:19', 'MANI V.MURUGAN', 'M03', 'TN74Q4709', 4650, 11820],
+].map((r, i) => ({
+  id: 'O' + i, ticket: r[0], date: r[1], time: r[2], custId: byName(r[3]), matId: r[4], matName: '', vehicle: r[5], dir: 'OUT',
+  tare: r[6], gross: r[7], manualRate: '', method: 'Credit', status: 'Completed', reason: '', remarks: '', by: 'Murugan R',
+}));
+
 const emp = [
   { id: 'E01', code: 'EM-01', name: 'Murugan R', role: 'Weighbridge Operator', phone: '98430 11902', joined: '2021-04-12', salary: 24000, status: 'Active' },
   { id: 'E02', code: 'EM-02', name: 'Selvam K', role: 'Driver', phone: '99524 88210', joined: '2022-01-08', salary: 21000, status: 'Active' },
@@ -101,11 +117,17 @@ const exp = [
   { id: 'X08', date: '2026-09-04', head: 'Insurance claim', desc: 'Settled — KA 05 AH 9087', type: 'Credit', amount: 24500, mode: 'Bank Transfer', party: 'United India' }
 ];
 
+
+// Vehicles holding a tare weight on the bridge.
 const onsite = [
-  { id: 'S1', ticket: 'WB-24119', vehicle: 'TN 29 BX 4412', custId: 'C02', matId: 'M01', tare: 14180, load: 18620, inAt: '10:42' },
-  { id: 'S2', ticket: 'WB-24120', vehicle: 'KA 05 AH 9087', custId: 'C05', matId: 'M04', tare: 12920, load: 16340, inAt: '11:15' }
+  { id: 'S1', ticket: 'WB-24113', vehicle: 'TN 78 MA 5806', custId: byName('SKS'), matId: 'M02', tare: 4320, load: 9470, inAt: '10:42', method: 'Credit' },
+  { id: 'S2', ticket: 'WB-24114', vehicle: 'TN 78 AZ 6221', custId: byName('PKV'), matId: 'M06', tare: 4250, load: 8280, inAt: '11:15', method: 'Credit' },
 ];
 
+export const SEED_NEXT_TICKET = 24115;
+
 export function seedDb() {
-  return { customers: cust, materials: mats, rates, orders: ord, employees: emp, attendance: att, advances: adv, payroll: pay, expenses: exp, onsite };
+  return JSON.parse(JSON.stringify({
+    customers: cust, suppliers, materials: mats, rates, orders: ord, employees: emp, attendance: att, advances: adv, payroll: pay, expenses: exp, onsite,
+  }));
 }

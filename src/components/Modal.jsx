@@ -17,7 +17,7 @@ export default function Modal({ modal, fields, form, errors, setField, calcLines
     return () => { window.removeEventListener('keydown', onKey); prev?.focus?.(); };
   }, []);
 
-  const isForm = modal.kind === 'form' || modal.kind === 'receipt';
+  const isForm = fields.length > 0;
 
   return (
     <div

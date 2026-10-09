@@ -3,7 +3,8 @@ export const M = (n) => '₹' + N(Math.round(n || 0));
 export const T = (n) => Number(n || 0).toFixed(2);
 export const pad2 = (n) => String(n).padStart(2, '0');
 export const hhmm = (d = new Date()) => pad2(d.getHours()) + ':' + pad2(d.getMinutes());
-export const isoDate = (d = new Date()) => d.toISOString().slice(0, 10);
+// Local calendar date (YYYY-MM-DD); toISOString() would give the UTC date, a day behind before 05:30 IST.
+export const isoDate = (d = new Date()) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
 
 export function brandMark(name) {
   const w = name.replace(/[^A-Za-z ]/g, ' ').trim().split(/\s+/).filter(Boolean);

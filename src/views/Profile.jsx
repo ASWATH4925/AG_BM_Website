@@ -11,8 +11,8 @@ const STATS = [
   { label: 'Last sign-in', value: 'Today', note: '07:42 · bridge terminal 1' },
 ];
 
-const MODULES = ['Dashboard', 'Customers', 'Materials', 'Rates', 'Orders', 'Weighbridge', 'Void Orders', 'Payments', 'Employees', 'Attendance', 'Advances', 'Payroll', 'Expenses']
-  .map((m) => ({ label: m, cls: m === 'Rates' || m === 'Void Orders' || m === 'Payroll' ? 'ag-t-warn' : 'ag-t-ok' }));
+const MODULES = ['Dashboard', 'Credit Parties', 'Soling Suppliers', 'Materials', 'Orders', 'Weighbridge', 'Void Orders', 'Payments', 'Employees', 'Attendance', 'Advances', 'Payroll', 'Expenses']
+  .map((m) => ({ label: m, cls: m === 'Credit Parties' || m === 'Void Orders' || m === 'Payroll' ? 'ag-t-warn' : 'ag-t-ok' }));
 
 const FIELDS = [['name', 'Full name'], ['email', 'Work email'], ['phone', 'Phone'], ['yard', 'Home yard'], ['employeeId', 'Employee ID']];
 

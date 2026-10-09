@@ -11,7 +11,6 @@ function deltaOf(now, was) {
   const p = Math.round(((now - was) / was) * 100);
   return { delta: (p >= 0 ? '+' : '') + p + '%', deltaTag: p >= 0 ? 'ag-t-ok' : 'ag-t-bad' };
 }
-const standingOf = (p) => (p >= 100 ? { s: 'At limit', t: 'ag-t-bad' } : p > 80 ? { s: 'Watch', t: 'ag-t-warn' } : { s: 'Clear', t: 'ag-t-ok' });
 
 export default function Dashboard({ d, tab, setTab, go }) {
   const D = d.db;
@@ -49,16 +48,17 @@ export default function Dashboard({ d, tab, setTab, go }) {
     { label: 'Void loss', value: M(voidLoss), note: voids + ' voids, charges retained' },
   ];
 
-  const atRisk = D.customers.filter((c) => d.outstanding(c) / c.limit > 0.8).length;
-  const exposureNote = atRisk ? atRisk + ' of ' + D.customers.length + ' accounts past 80% of limit' : 'Every account inside its limit';
+  const owing = D.customers.filter((c) => d.outstanding(c) > 0);
+  const exposureNote = owing.length ? owing.length + ' of ' + D.customers.length + ' credit parties owe us' : 'No credit party owes anything';
   const byOutstanding = D.customers.slice().sort((a, b) => d.outstanding(b) - d.outstanding(a));
+  const topOwing = byOutstanding.filter((c) => d.outstanding(c) > 0).slice(0, 8);
 
   const byMat = {};
   done.forEach((o) => { byMat[o.matId] = (byMat[o.matId] || 0) + d.net(o); });
   const maxM = Math.max(...Object.values(byMat), 1);
   const matBars = Object.keys(byMat).sort((a, b) => byMat[b] - byMat[a]).slice(0, 6)
     .map((k) => ({ key: k, label: d.mat(k).name, value: T(byMat[k]) + ' t', pct: Math.round((byMat[k] / maxM) * 100) }));
-  const maxC = Math.max(...D.customers.map((c) => c.limit), 1);
+  const maxC = Math.max(...D.customers.map((c) => d.outstanding(c)), 1);
 
   return (
     <section aria-label="Dashboard">
@@ -106,21 +106,20 @@ export default function Dashboard({ d, tab, setTab, go }) {
               action={<button type="button" className="btn btn-ghost" onClick={() => go('payments')}>Ledger</button>}
             >
               <div style={{ padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                {byOutstanding.map((c) => {
+                {topOwing.map((c, i) => {
                   const o = d.outstanding(c);
-                  const p = Math.round((o / c.limit) * 100);
-                  const over = p > 80;
-                  const color = over ? 'var(--color-accent)' : 'var(--color-neutral-800)';
+                  const share = Math.round((o / Math.max(outs, 1)) * 100);
+                  const color = i < 3 ? 'var(--color-accent)' : 'var(--color-neutral-800)';
                   return (
                     <div className="ag-listrow" key={c.id}>
                       <div className="ag-bar-row">
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{c.name}<Tag cls={over ? 'ag-t-warn' : 'ag-t-mute'}>{p + '%'}</Tag></span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{c.name}<Tag cls={i < 3 ? 'ag-t-warn' : 'ag-t-mute'}>{share + '%'}</Tag></span>
                         <span className="ag-tabular" style={{ color }}>{M(o)}</span>
                       </div>
                       <div className="ag-track ag-track-bar">
                         <div className="ag-fill" style={{ background: color, width: Math.round((o / maxC) * 100) + '%' }} />
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', marginTop: 4 }}>of a {M(c.limit)} limit · last receipt {c.last}</div>
+                      <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', marginTop: 4 }}>{share}% of all outstanding · last receipt {c.last}</div>
                     </div>
                   );
                 })}
@@ -208,23 +207,21 @@ export default function Dashboard({ d, tab, setTab, go }) {
               <table className="table" style={{ width: '100%', minWidth: 720 }}>
                 <thead>
                   <tr>
-                    <th>Customer</th><th style={{ textAlign: 'right' }}>Outstanding</th><th style={{ textAlign: 'right' }}>Limit</th>
-                    <th style={{ textAlign: 'right' }}>Utilisation</th><th>Last receipt</th><th>Standing</th>
+                    <th>Credit party</th><th style={{ textAlign: 'right' }}>Outstanding</th><th style={{ textAlign: 'right' }}>Billed</th>
+                    <th style={{ textAlign: 'right' }}>Received</th><th>Last receipt</th><th>Standing</th>
                   </tr>
                 </thead>
                 <tbody>
                   {byOutstanding.map((c) => {
                     const o = d.outstanding(c);
-                    const p = Math.round((o / c.limit) * 100);
-                    const st = standingOf(p);
                     return (
                       <tr key={c.id}>
                         <td style={{ fontWeight: 600 }}>{c.name}</td>
                         <td className="ag-tabular" style={{ textAlign: 'right', fontWeight: 600 }}>{M(o)}</td>
-                        <td className="ag-tabular" style={{ textAlign: 'right', color: 'var(--color-neutral-700)' }}>{M(c.limit)}</td>
-                        <td className="ag-tabular" style={{ textAlign: 'right' }}>{p}%</td>
+                        <td className="ag-tabular" style={{ textAlign: 'right', color: 'var(--color-neutral-700)' }}>{M(d.billed(c))}</td>
+                        <td className="ag-tabular" style={{ textAlign: 'right', color: 'var(--color-neutral-700)' }}>{M(c.received || 0)}</td>
                         <td style={{ color: 'var(--color-neutral-700)' }}>{c.last}</td>
-                        <td><Tag cls={st.t}>{st.s}</Tag></td>
+                        <td><Tag>{o > 0 ? 'Due' : 'Clear'}</Tag></td>
                       </tr>
                     );
                   })}

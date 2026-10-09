@@ -1,3 +1,4 @@
+import { OTHER_MATERIAL } from './domain';
 import { M, N, T } from './format';
 
 export const NAV_GROUPS = ['Operations', 'Masters', 'Finance', 'People'];
@@ -7,9 +8,12 @@ export const MODS = {
   weighbridge: { label: 'Weighbridge', group: 'Operations', title: 'Weighbridge station', sub: 'Capture tare on entry, gross on exit. Net weight and price compute themselves.' },
   orders: { label: 'Orders', group: 'Operations', title: 'Orders & transactions', sub: 'Every weighed movement, priced from the customer’s rate card.' },
   voids: { label: 'Void Orders', group: 'Operations', title: 'Void orders', sub: 'Cancelled loads and the loading charges retained against them.' },
-  customers: { label: 'Customers', group: 'Masters', title: 'Customers', sub: 'Accounts, credit limits and site contacts.' },
-  materials: { label: 'Materials', group: 'Masters', title: 'Materials', sub: 'Products, list rates and stock on ground.' },
-  rates: { label: 'Rate Cards', group: 'Masters', title: 'Customer material rates', sub: 'Contract rates that override the list rate at the weighbridge.' },
+  customers: { label: 'Credit Parties', group: 'Masters', title: 'Credit parties', sub: 'Everyone who takes material on credit — owner, address, contact and their own ton rates.' },
+  suppliers: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling suppliers', sub: 'Boulder suppliers we buy from and owe money to. Kept apart from credit parties.' },
+  materials: { label: 'Materials', group: 'Masters', title: 'Materials', sub: 'What we sell and buy, and the standard rate per ton for each period.' },
+  // Detail screens, reached from the lists above (not shown in the sidebar).
+  party: { label: 'Credit Parties', group: 'Masters', title: 'Credit party', sub: '', hidden: true, navAs: 'customers' },
+  stdrates: { label: 'Materials', group: 'Masters', title: 'Standard rates', sub: 'Rate per ton applied when a party has no rate of its own for that date.', hidden: true, navAs: 'materials' },
   payments: { label: 'Payments & Credit', group: 'Finance', title: 'Payments & credit', sub: 'Receipts, outstanding balances and ageing by account.' },
   expenses: { label: 'Expenses', group: 'Finance', title: 'Expenses', sub: 'Credit and debit entries against the yard.' },
   employees: { label: 'Employees', group: 'People', title: 'Employees', sub: 'Roster, roles and monthly salary.' },
@@ -20,55 +24,91 @@ export const MODS = {
 
 const opts = (a) => a.map((x) => ({ v: x, l: x }));
 
+function uniqueName(list, f, id, what) {
+  const n = String(f.name || '').trim().toLowerCase();
+  return n && (list || []).some((x) => x.id !== id && x.name.trim().toLowerCase() === n) ? { name: what + ' with this name already exists.' } : {};
+}
+
+// Blank, a 10-digit mobile, or the same with a 91 / +91 prefix.
+function checkContact(f) {
+  const digits = String(f.contact || '').replace(/\D/g, '');
+  return !digits || digits.length === 10 || (digits.length === 12 && digits.startsWith('91')) ? {} : { contact: 'Enter a 10-digit mobile number.' };
+}
+
 // Columns, form fields, filters and footers for each list module.
 export function moduleConfig(mod, d) {
   const D = d.db;
   const co = () => D.customers.map((c) => ({ v: c.id, l: c.name }));
-  const mo = () => D.materials.map((x) => ({ v: x.id, l: x.name }));
+  const so = () => D.materials.filter((x) => x.kind !== 'purchase').map((x) => ({ v: x.id, l: x.name }));
   const eo = () => D.employees.map((e) => ({ v: e.id, l: e.name }));
+  const linkedSupplier = (c) => (D.suppliers || []).find((p) => p.linkedCustId === c.id);
 
   if (mod === 'customers') return {
-    key: 'customers', add: 'New customer', statusKey: 'status', statuses: ['All', 'Active', 'On hold'],
+    key: 'customers', add: 'New credit party', statusKey: 'status', statuses: ['All', 'Active', 'On hold'],
     cols: [
-      { k: 'code', label: 'Code' }, { k: 'name', label: 'Customer' }, { k: 'city', label: 'Site' }, { k: 'phone', label: 'Phone' },
-      { k: 'limit', label: 'Credit limit', t: 'money' }, { k: '_out', label: 'Outstanding', t: 'money', get: (c) => d.outstanding(c) },
-      { k: '_use', label: 'Limit used', t: 'text', get: (c) => Math.round((d.outstanding(c) / c.limit) * 100) + '%' }, { k: 'status', label: 'Status', t: 'tag' },
+      { k: 'code', label: 'Code' }, { k: 'name', label: 'Party' }, { k: 'owner', label: 'Owner' }, { k: 'contact', label: 'Contact' },
+      { k: 'address', label: 'Address' }, { k: '_out', label: 'Outstanding', t: 'money', get: (c) => d.outstanding(c) },
+      { k: '_rc', label: 'Own rates', t: 'num', get: (c) => D.rates.filter((r) => r.custId === c.id).length },
+      { k: '_sp', label: 'Also supplies soling', get: (c) => (linkedSupplier(c) || {}).name || '' },
+      { k: 'status', label: 'Status', t: 'tag' },
+    ],
+    rowAction: { label: 'Open', kind: 'party' },
+    fields: [
+      { k: 'name', label: 'Party name', req: 1, span: 'span 2' }, { k: 'owner', label: 'Owner name' },
+      { k: 'contact', label: 'Contact number', placeholder: '98430 22417' }, { k: 'address', label: 'Address', span: 'span 2' },
+      { k: 'gst', label: 'GSTIN' }, { k: 'status', label: 'Status', type: 'select', options: opts(['Active', 'On hold']) },
+      { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+    ],
+    validate: (f, id) => ({ ...uniqueName(D.customers, f, id, 'A credit party'), ...checkContact(f) }),
+    foot: (rows) => 'Outstanding on filtered parties: ' + M(rows.reduce((s, c) => s + d.outstanding(c), 0)),
+  };
+
+  if (mod === 'suppliers') return {
+    key: 'suppliers', add: 'New soling supplier', statusKey: 'status', statuses: ['All', 'Active', 'Inactive'],
+    cols: [
+      { k: 'code', label: 'Code' }, { k: 'name', label: 'Supplier' }, { k: 'owner', label: 'Owner' }, { k: 'contact', label: 'Contact' },
+      { k: 'upi', label: 'UPI ID / number' }, { k: 'address', label: 'Address' },
+      { k: '_lc', label: 'Also a credit party', get: (p) => (p.linkedCustId ? d.cust(p.linkedCustId).name : '') },
+      { k: 'status', label: 'Status', t: 'tag' },
     ],
     fields: [
-      { k: 'name', label: 'Customer name', req: 1, span: 'span 2' }, { k: 'city', label: 'Site / city', req: 1 }, { k: 'phone', label: 'Phone', req: 1 },
-      { k: 'gst', label: 'GSTIN' }, { k: 'limit', label: 'Credit limit', type: 'number', req: 1, hint: '₹ — blocks new credit orders above this' },
-      { k: 'status', label: 'Status', type: 'select', options: opts(['Active', 'On hold']) },
+      { k: 'name', label: 'Supplier name', req: 1, span: 'span 2' }, { k: 'owner', label: 'Owner name' },
+      { k: 'contact', label: 'Contact number', placeholder: '98430 22417' },
+      { k: 'upi', label: 'UPI ID / number', hint: 'Where UPI payments to this supplier are sent' },
+      { k: 'address', label: 'Address', span: 'span 2' },
+      { k: 'linkedCustId', label: 'Same person as credit party', type: 'select', options: [{ v: '', l: 'Not linked' }].concat(co()), hint: 'Accounts stay separate; this only links them for reference' },
+      { k: 'status', label: 'Status', type: 'select', options: opts(['Active', 'Inactive']) },
+      { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
     ],
-    foot: (rows) => 'Outstanding on filtered accounts: ' + M(rows.reduce((s, c) => s + d.outstanding(c), 0)),
+    validate: (f, id) => ({ ...uniqueName(D.suppliers, f, id, 'A soling supplier'), ...checkContact(f) }),
+    foot: (rows) => rows.length + ' soling supplier(s) · purchases and what we owe them come with the soling module',
   };
 
   if (mod === 'materials') return {
     key: 'materials', add: 'New material', statusKey: 'status', statuses: ['All', 'Active', 'Paused'],
     cols: [
-      { k: 'code', label: 'Code' }, { k: 'name', label: 'Material' }, { k: 'unit', label: 'Unit' }, { k: 'rate', label: 'List rate / t', t: 'money' },
-      { k: 'stock', label: 'Stock (t)', t: 'num' }, { k: '_val', label: 'Stock value', t: 'money', get: (x) => x.stock * x.rate }, { k: 'status', label: 'Status', t: 'tag' },
+      { k: 'code', label: 'Code' }, { k: 'name', label: 'Material' }, { k: 'group', label: 'Group' },
+      { k: '_k', label: 'We', get: (x) => (x.kind === 'purchase' ? 'Buy' : 'Sell') }, { k: 'unit', label: 'Priced per' },
+      { k: '_r', label: 'Standard rate today / t', get: (x) => { const r = d.rateFor('', x.id).rate; return r ? M(r) : '—'; } },
+      {
+        k: '_rs', label: 'Rate since',
+        get: (x) => {
+          const r = d.rateFor('', x.id).card;
+          if (r) return r.from;
+          return x.id === OTHER_MATERIAL ? 'Entered per ticket' : x.kind === 'purchase' ? 'Set with soling purchases' : 'Not set';
+        },
+      },
+      { k: 'status', label: 'Status', t: 'tag' },
     ],
+    rowAction: { label: 'Rates', kind: 'stdrates' },
     fields: [
-      { k: 'name', label: 'Material', req: 1, span: 'span 2' }, { k: 'unit', label: 'Unit', type: 'select', options: opts(['Tonne', 'Load', 'Cubic metre']) },
-      { k: 'rate', label: 'List rate', type: 'number', req: 1 }, { k: 'stock', label: 'Stock on ground (t)', type: 'number' },
+      { k: 'name', label: 'Material', req: 1, span: 'span 2' },
+      { k: 'group', label: 'Group', type: 'select', options: opts(['Aggregate', 'Sand', 'Dust', 'Wedmix', 'Other', 'Purchase']) },
+      { k: 'kind', label: 'We', type: 'select', options: [{ v: 'sale', l: 'Sell it' }, { v: 'purchase', l: 'Buy it' }] },
       { k: 'status', label: 'Status', type: 'select', options: opts(['Active', 'Paused']) },
     ],
-    foot: (rows) => 'Stock value: ' + M(rows.reduce((s, x) => s + x.stock * x.rate, 0)),
-  };
-
-  if (mod === 'rates') return {
-    key: 'rates', add: 'New contract rate', dateKey: 'from',
-    cols: [
-      { k: '_c', label: 'Customer', get: (r) => d.cust(r.custId).name }, { k: '_m', label: 'Material', get: (r) => d.mat(r.matId).name },
-      { k: '_l', label: 'List rate', t: 'money', get: (r) => d.mat(r.matId).rate }, { k: 'rate', label: 'Contract rate', t: 'money' },
-      { k: '_d', label: 'Variance', t: 'text', get: (r) => { const x = r.rate - d.mat(r.matId).rate; return (x > 0 ? '+' : '') + M(x); } },
-      { k: 'from', label: 'Effective from' }, { k: 'by', label: 'Approved by' },
-    ],
-    fields: [
-      { k: 'custId', label: 'Customer', type: 'select', options: co(), req: 1 }, { k: 'matId', label: 'Material', type: 'select', options: mo(), req: 1 },
-      { k: 'rate', label: 'Contract rate / t', type: 'number', req: 1 }, { k: 'from', label: 'Effective from', type: 'date', req: 1 }, { k: 'by', label: 'Approved by' },
-    ],
-    foot: (rows) => rows.length + ' contract rate(s) override the list price',
+    validate: (f, id) => uniqueName(D.materials, f, id, 'A material'),
+    foot: (rows) => rows.filter((x) => x.kind !== 'purchase' && x.id !== OTHER_MATERIAL && !d.rateFor('', x.id).card).length + ' sold material(s) without a standard rate today',
   };
 
   if (mod === 'orders' || mod === 'voids') {
@@ -79,35 +119,45 @@ export function moduleConfig(mod, d) {
       only: isVoid ? (o) => o.status === 'Void' : (o) => o.status !== 'Void',
       cols: isVoid
         ? [
-            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Customer', get: (o) => d.cust(o.custId).name },
-            { k: '_m', label: 'Material', get: (o) => d.mat(o.matId).name }, { k: 'vehicle', label: 'Vehicle' }, { k: 'reason', label: 'Reason' },
+            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.cust(o.custId).name },
+            { k: '_m', label: 'Material', get: (o) => d.matLabel(o) }, { k: 'vehicle', label: 'Vehicle' }, { k: 'reason', label: 'Reason' },
             { k: '_lc', label: 'Loading charge', t: 'money', get: () => d.loading() }, { k: 'by', label: 'Voided by' }, { k: 'status', label: 'Status', t: 'tag' },
           ]
         : [
-            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Customer', get: (o) => d.cust(o.custId).name },
-            { k: '_m', label: 'Material', get: (o) => d.mat(o.matId).name }, { k: 'vehicle', label: 'Vehicle' }, { k: 'dir', label: 'Dir' },
-            { k: '_n', label: 'Net (t)', t: 'num2', get: (o) => d.net(o) }, { k: '_r', label: 'Rate', t: 'money', get: (o) => d.rateFor(o.custId, o.matId).rate },
+            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.cust(o.custId).name },
+            { k: '_m', label: 'Material', get: (o) => d.matLabel(o) }, { k: 'vehicle', label: 'Vehicle' },
+            { k: '_n', label: 'Net (t)', t: 'num2', get: (o) => d.net(o) }, { k: '_r', label: 'Rate / t', t: 'money', get: (o) => d.orderRate(o).rate },
             { k: '_a', label: 'Amount', t: 'money', get: (o) => d.amount(o) }, { k: 'method', label: 'Method' }, { k: 'status', label: 'Status', t: 'tag' },
           ],
       fields: [
-        { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'custId', label: 'Customer', type: 'select', options: co(), req: 1 },
-        { k: 'matId', label: 'Material', type: 'select', options: mo(), req: 1 }, { k: 'vehicle', label: 'Vehicle number', req: 1 },
-        { k: 'dir', label: 'Direction', type: 'select', options: opts(['OUT', 'IN']) },
+        { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'custId', label: 'Credit party', type: 'select', options: co(), req: 1 },
+        { k: 'matId', label: 'Material', type: 'select', options: so(), req: 1 },
+        { k: 'matName', label: 'Material name', hint: 'Only for Other — type what was loaded' },
+        { k: 'vehicle', label: 'Vehicle number', req: 1 },
         { k: 'tare', label: 'Tare weight (kg)', type: 'number', req: 1 }, { k: 'gross', label: 'Gross weight (kg)', type: 'number', req: 1 },
-        { k: 'method', label: 'Payment method', type: 'select', options: opts(['Cash', 'Credit', 'UPI', 'Bank Transfer']) },
-        { k: 'status', label: 'Status', type: 'select', options: opts(['In Transit', 'Completed', 'Void']) },
+        { k: 'manualRate', label: 'Manual rate (₹ / ton)', type: 'number', hint: 'Leave blank to use the rate card for this date' },
+        { k: 'method', label: 'Payment method', type: 'select', options: opts(['Credit', 'Cash', 'UPI', 'Bank Transfer']) },
+        { k: 'status', label: 'Status', type: 'select', options: opts(['Completed', 'In Transit', 'Void']) },
         { k: 'reason', label: 'Void reason', span: 'span 2', hint: 'Required when the status is Void' },
+        { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
       ],
+      validate: (f) => {
+        const e = {};
+        if (f.status === 'Void' && !String(f.reason || '').trim()) e.reason = 'A void needs a reason.';
+        if (+f.gross && +f.tare && +f.gross <= +f.tare) e.gross = 'Gross must exceed tare.';
+        if (f.matId === OTHER_MATERIAL && !String(f.matName || '').trim()) e.matName = 'Type the material name for Other.';
+        const manual = String(f.manualRate ?? '').trim();
+        if (manual && !(+manual > 0)) e.manualRate = 'Enter a rate greater than zero, or leave it blank.';
+        else if (!manual && f.matId && f.date && !d.rateFor(f.custId, f.matId, f.date).rate) e.manualRate = 'No rate card covers this date — enter a manual rate.';
+        return e;
+      },
       calc: (f) => {
-        const o = { custId: f.custId, matId: f.matId, tare: +f.tare || 0, gross: +f.gross || 0 };
-        const r = d.rateFor(o.custId, o.matId);
+        const o = { custId: f.custId, matId: f.matId, date: f.date, manualRate: f.manualRate, tare: +f.tare || 0, gross: +f.gross || 0 };
+        const r = d.orderRate(o);
         return [
           { label: 'Net weight', value: T(d.net(o)) + ' t' },
-          { label: 'Applied rate (' + r.src + ')', value: M(r.rate) + ' / t' },
-          { label: 'Material value', value: M(d.amount(o)) },
-          { label: 'Loading charge', value: M(d.loading()) },
-          { label: 'GST @ ' + d.gstPct() + '%', value: M(((d.amount(o) + d.loading()) * d.gstPct()) / 100) },
-          { label: 'Net payable', value: M(d.payable(o)) },
+          { label: 'Rate (' + r.src + ')', value: M(r.rate) + ' / t' },
+          { label: 'Amount (net tons × rate)', value: M(d.amount(o)) },
         ];
       },
       foot: (rows) => (isVoid
@@ -117,16 +167,16 @@ export function moduleConfig(mod, d) {
   }
 
   if (mod === 'payments') return {
-    key: 'customers', add: 'Record receipt', statusKey: '_ag', statuses: ['All', 'Clear', 'Partial', 'Overdue'],
+    key: 'customers', add: 'Record receipt', statusKey: '_ag', statuses: ['All', 'Clear', 'Due'],
     cols: [
-      { k: 'name', label: 'Customer' }, { k: 'invoiced', label: 'Invoiced', t: 'money' }, { k: 'received', label: 'Received', t: 'money' },
-      { k: '_out', label: 'Outstanding', t: 'money', get: (c) => d.outstanding(c) }, { k: '_hd', label: 'Headroom', t: 'money', get: (c) => c.limit - d.outstanding(c) },
+      { k: 'name', label: 'Credit party' }, { k: '_b', label: 'Billed', t: 'money', get: (c) => d.billed(c) }, { k: 'received', label: 'Received', t: 'money' },
+      { k: '_out', label: 'Outstanding', t: 'money', get: (c) => d.outstanding(c) },
       { k: 'last', label: 'Last receipt' },
-      { k: '_ag', label: 'Ageing', t: 'tag', get: (c) => (d.outstanding(c) === 0 ? 'Clear' : c.last < '2026-08-25' ? 'Overdue' : 'Partial') },
+      { k: '_ag', label: 'Standing', t: 'tag', get: (c) => (d.outstanding(c) === 0 ? 'Clear' : 'Due') },
     ],
-    rowAction: 'Receipt',
+    rowAction: { label: 'Receipt', kind: 'receipt' },
     fields: [
-      { k: 'name', label: 'Customer name', req: 1 }, { k: 'limit', label: 'Credit limit', type: 'number', req: 1 },
+      { k: 'name', label: 'Party name', req: 1, span: 'span 2' },
       { k: 'received', label: 'Total received', type: 'number' }, { k: 'last', label: 'Last receipt', type: 'date' },
     ],
     foot: (rows) => 'Total outstanding: ' + M(rows.reduce((s, c) => s + d.outstanding(c), 0)),
@@ -237,10 +287,9 @@ export function listKpis(mod, rows, d) {
       { label: 'Open in transit', value: String(rows.filter((o) => o.status === 'In Transit').length), note: 'Awaiting delivery confirmation' },
     ],
     payments: () => [
-      { label: 'Invoiced', value: M(sum(rows, (x) => x.invoiced)), note: 'Lifetime, filtered accounts' },
+      { label: 'Billed', value: M(sum(rows, d.billed)), note: 'Credit tickets, filtered parties' },
       { label: 'Received', value: M(sum(rows, (x) => x.received)), note: 'Cash, UPI and transfers' },
-      { label: 'Outstanding', value: M(sum(rows, d.outstanding)), note: rows.filter((x) => d.outstanding(x) > 0).length + ' accounts' },
-      { label: 'Overdue > 30 days', value: M(sum(rows.filter((x) => x.last < '2026-08-25'), d.outstanding)), note: 'No receipt since 25 Aug' },
+      { label: 'Outstanding', value: M(sum(rows, d.outstanding)), note: rows.filter((x) => d.outstanding(x) > 0).length + ' parties' },
     ],
     voids: () => [
       { label: 'Voided loads', value: String(rows.length), note: 'Filtered period' },
@@ -259,14 +308,20 @@ export function listKpis(mod, rows, d) {
       { label: 'Still pending', value: M(sum(rows.filter((p) => p.status !== 'Paid'), (p) => d.payLine(p).net)), note: rows.filter((p) => p.status !== 'Paid').length + ' unpaid' },
     ],
     customers: () => [
-      { label: 'Accounts', value: String(rows.length), note: rows.filter((x) => x.status === 'On hold').length + ' on hold' },
-      { label: 'Credit sanctioned', value: M(sum(rows, (x) => x.limit)), note: 'Sum of limits' },
-      { label: 'Credit used', value: M(sum(rows, d.outstanding)), note: 'Outstanding balances' },
+      { label: 'Credit parties', value: String(rows.length), note: rows.filter((x) => x.status === 'On hold').length + ' on hold' },
+      { label: 'Outstanding', value: M(sum(rows, d.outstanding)), note: rows.filter((x) => d.outstanding(x) > 0).length + ' parties owe us' },
+      { label: 'With their own rates', value: String(rows.filter((x) => D.rates.some((r) => r.custId === x.id)).length), note: 'Others pay the standard rate' },
+      { label: 'Details missing', value: String(rows.filter((x) => !x.owner || !x.contact || !x.address).length), note: 'No owner, contact or address yet' },
+    ],
+    suppliers: () => [
+      { label: 'Soling suppliers', value: String(rows.length), note: rows.filter((x) => x.status !== 'Active').length + ' inactive' },
+      { label: 'With UPI details', value: String(rows.filter((x) => x.upi).length), note: 'Needed for UPI payments' },
+      { label: 'Also credit parties', value: String(rows.filter((x) => x.linkedCustId).length), note: 'Separate accounts, linked' },
     ],
     materials: () => [
-      { label: 'Products', value: String(rows.length), note: rows.filter((x) => x.status === 'Paused').length + ' paused' },
-      { label: 'Stock on ground', value: N(sum(rows, (x) => x.stock)) + ' t', note: 'Across all products' },
-      { label: 'Stock value', value: M(sum(rows, (x) => x.stock * x.rate)), note: 'At list rate' },
+      { label: 'Materials', value: String(rows.length), note: rows.filter((x) => x.status === 'Paused').length + ' paused' },
+      { label: 'We sell', value: String(rows.filter((x) => x.kind !== 'purchase').length), note: 'Priced per ton' },
+      { label: 'We buy', value: String(rows.filter((x) => x.kind === 'purchase').length), note: 'Soling (boulder)' },
     ],
     employees: () => [
       { label: 'Headcount', value: String(rows.length), note: rows.filter((x) => x.status !== 'Active').length + ' on leave' },
@@ -282,11 +337,6 @@ export function listKpis(mod, rows, d) {
       { label: 'Advanced', value: M(sum(rows, (x) => x.amount)), note: rows.length + ' entries' },
       { label: 'Recovered', value: M(sum(rows, (x) => x.recovered)), note: 'Against salary' },
       { label: 'Balance', value: M(sum(rows, (x) => x.amount - x.recovered)), note: 'Still to recover' },
-    ],
-    rates: () => [
-      { label: 'Contract rates', value: String(rows.length), note: 'Active overrides' },
-      { label: 'Customers covered', value: String(new Set(rows.map((x) => x.custId)).size), note: 'Of ' + D.customers.length + ' accounts' },
-      { label: 'Average discount', value: rows.length ? M(sum(rows, (x) => d.mat(x.matId).rate - x.rate) / rows.length) + ' / t' : '₹0', note: 'Against list rate' },
     ],
   };
   return (K[mod] || (() => []))();

@@ -2,6 +2,7 @@ import Field from '../components/Field';
 import Panel from '../components/Panel';
 import Select from '../components/Select';
 import { settings } from '../config';
+import { OTHER_MATERIAL } from '../lib/domain';
 import { M, N, T } from '../lib/format';
 
 const METHODS = ['Cash', 'Credit', 'UPI', 'Bank Transfer'].map((x) => ({ v: x, l: x }));
@@ -95,7 +96,7 @@ export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut
               <Select label="Customer" value={wb.custId} options={D.customers.map((c) => ({ v: c.id, l: c.name }))} onChange={(v) => setWb({ custId: v })} />
             </Field>
             <Field label="Material">
-              <Select label="Material" value={wb.matId} options={D.materials.map((m) => ({ v: m.id, l: m.name + ' · ₹' + m.rate + '/t' }))} onChange={(v) => setWb({ matId: v })} />
+              <Select label="Material" value={wb.matId} options={d.salesMaterials().filter((m) => m.id !== OTHER_MATERIAL).map((m) => { const r = d.rateFor(wb.custId, m.id).rate; return { v: m.id, l: m.name + (r ? ' · ' + M(r) + '/t' : ' · no rate') }; })} onChange={(v) => setWb({ matId: v })} />
             </Field>
             <Field label="Payment method">
               <Select label="Payment method" value={wb.method} options={METHODS} onChange={(v) => setWb({ method: v })} />

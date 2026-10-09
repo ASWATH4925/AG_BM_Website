@@ -4,7 +4,7 @@ import { MODS, NAV_GROUPS } from '../lib/modules';
 import { ChevronRight, LogOut } from './Icons';
 
 export default function Sidebar({ wide, mod, onsiteCount, go }) {
-  const keys = Object.keys(MODS);
+  const keys = Object.keys(MODS).filter((k) => !MODS[k].hidden);
 
   if (!wide) {
     return (

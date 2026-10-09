@@ -7,6 +7,6 @@ export const settings = {
 };
 
 // The demo data is pinned to this business day.
-export const TODAY = '2026-09-09';
-export const TODAY_LABEL = '9 Sep 2026';
+export const TODAY = '2026-10-08';
+export const TODAY_LABEL = '8 Oct 2026';
 export const IDLE_SCALE_KG = 14180;
