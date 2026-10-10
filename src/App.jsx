@@ -5,23 +5,27 @@ import Sidebar from './components/Sidebar';
 import { IDLE_SCALE_KG, settings, TODAY } from './config';
 import PaymentEditor from './components/PaymentEditor';
 import { SEED_NEXT_TICKET, seedDb, upgradeDb } from './data/seed';
-import { checkPay, defaultPay, emptyLine, fromRecords, isPaidMethod, round2, toRecords } from './lib/payments';
+import { checkPay, defaultPay, emptyLine, fromRecords, isPaidMethod, METHOD_LABEL, paidToLabel, round2, toRecords } from './lib/payments';
 import { matchMaterial, normalName, parseRegister } from './lib/register';
 import RegisterImport, { rowBill, saleStatus, solingStatus } from './views/RegisterImport';
 import { createDomain, OTHER_MATERIAL, periodLabel, planRate } from './lib/domain';
 import { hhmm, isoDate, M, N, T } from './lib/format';
 import { MODS, moduleConfig } from './lib/modules';
 import { loadSaved, save as saveToBrowser } from './lib/storage';
+import CreditParties from './views/CreditParties';
 import Dashboard from './views/Dashboard';
 import ListModule from './views/ListModule';
 import Login from './views/Login';
 import PartyDetail, { StandardRates } from './views/PartyDetail';
 import Profile from './views/Profile';
+import VoidedEntries from './views/VoidedEntries';
 import Weighbridge from './views/Weighbridge';
 
-const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'salary', 'tare', 'gross', 'days', 'ot', 'recovered', 'received'];
+const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'salary', 'tare', 'gross', 'days', 'ot', 'recovered', 'received', 'gst', 'rent'];
 const FILTERS_CLEAR = { q: '', status: 'All', from: '', to: '', sortK: null };
-const RECEIPT_METHODS = ['Cash', 'UPI', 'Bank Transfer', 'Credit note'].map((x) => ({ v: x, l: x }));
+const RECEIPT_METHODS = ['Cash', 'UPI', 'Account', 'Cheque'].map((x) => ({ v: x, l: METHOD_LABEL[x] || x }));
+// Modules drawn by their own view instead of the generic list (their config still drives add/edit forms).
+const CUSTOM_LISTS = ['customers', 'voids'];
 const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'stdrates', 'import'];
 const SIGNED_IN_AS = 'A. Gopalakrishnan';
 
@@ -140,8 +144,8 @@ export default function App() {
     if (!v) return;
     const o = ticketFromOnsite(v, { gross: s.scale, status: 'Completed', reason: '' });
     openPay({
-      source: 'weighbridge', ticket: o, onsiteId: v.id, bill: d.amount(o), walkIn: false,
-      title: v.ticket + ' — ' + d.cust(v.custId).name, initial: defaultPay(d.amount(o), { walkIn: false, cashSerial: false }),
+      source: 'weighbridge', ticket: o, onsiteId: v.id, bill: d.billTotal(o), walkIn: false,
+      title: v.ticket + ' — ' + d.cust(v.custId).name, initial: defaultPay(d.billTotal(o), { walkIn: false, cashSerial: false }),
     });
   };
 
@@ -178,7 +182,7 @@ export default function App() {
   const openTicketPay = (o) => {
     const recs = d.paymentsFor(o.id);
     const legacyPaid = !recs.length && isPaidMethod(o.method);
-    const bill = d.amount(o);
+    const bill = d.billTotal(o);
     const method = o.method === 'Bank Transfer' ? 'Account' : o.method;
     openPay({
       source: 'ticket', ticket: o, bill, walkIn: !o.custId,
@@ -246,7 +250,7 @@ export default function App() {
   const importFile = async (file) => {
     try {
       const parsed = await parseRegister(await file.arrayBuffer());
-      const batch = { id: 'B' + Date.now(), file: file.name, at: new Date().toISOString(), from: parsed.from, to: parsed.to, rows: parsed.rows.length };
+      const batch = { id: 'B' + Date.now(), file: file.name, at: isoDate() + 'T' + hhmm(), from: parsed.from, to: parsed.to, rows: parsed.rows.length };
       const existing = new Set(s.db.staging.map((r) => r.key));
       const rows = parsed.rows.map((r) => stageRow(r, batch.id));
       // Rows already in the books or already waiting here are left out and only counted.
@@ -353,9 +357,12 @@ export default function App() {
     toast(ready.length + ' soling load(s) saved for the soling ledger.');
   };
 
-  const removeStaged = (key) => set((st) => ({ db: { ...st.db, staging: st.db.staging.filter((r) => r.key !== key) } }));
+  const removeStaged = (key) => {
+    const row = s.db.staging.find((r) => r.key === key);
+    askDelete({ ...row, id: row.key }, 'staging');
+  };
   const clearStaged = () => set({
-    modal: { kind: 'clearStaging', title: 'Clear all pending rows?', kicker: 'Register import', confirmLabel: 'Clear', message: 'Rows not yet posted are removed. You can load the register again later.' },
+    modal: { kind: 'clearStaging', title: 'Void all pending rows?', kicker: 'Register import', confirmLabel: 'Void all', message: 'Rows not yet posted go to Voided entries, where they can be restored.' },
   });
 
   // ---- list modules ----
@@ -363,12 +370,91 @@ export default function App() {
   const cfg = cfgOf(s.mod);
   const party = s.mod === 'party' ? s.db.customers.find((c) => c.id === s.partyId) : null;
 
-  const openParty = (id) => set({ mod: 'party', partyId: id, partyTab: 'Rates', modal: null });
+  const openParty = (id) => set({ mod: 'party', partyId: id, partyTab: 'Loads taken', modal: null });
 
+  // Receipt on a party's account: how it was paid and who received the money (company, a soling supplier, or someone else).
   const openReceipt = (c) => set({
-    modal: { kind: 'receipt', id: c.id, title: 'Record receipt — ' + c.name, kicker: 'Payments', confirmLabel: 'Post receipt' },
-    form: { amount: '', method: 'Bank Transfer', date: isoDate(), ref: '' }, errors: {},
+    modal: { kind: 'receipt', id: c.id, title: 'Record payment — ' + c.name, kicker: 'Payment received', confirmLabel: 'Save payment' },
+    form: { amount: '', method: 'Cash', to: 'company', toName: '', date: isoDate(), time: hhmm(), ref: '', remarks: '' }, errors: {},
   });
+
+  // ---- voided entries: nothing is deleted outright ----
+  const KIND_NAME = {
+    orders: 'Load', payments: 'Payment', customers: 'Credit party', suppliers: 'Soling supplier', materials: 'Material', rates: 'Rate period',
+    staging: 'Import row', expenses: 'Expense', employees: 'Employee', attendance: 'Attendance entry', advances: 'Advance', payroll: 'Payroll line',
+  };
+  const voidEntryFor = (key, row) => {
+    const D = s.db;
+    if (key === 'orders') {
+      return { kind: 'Load', label: row.ticket + ' · ' + d.partyLabel(row) + ' · ' + d.matLabel(row) + ' · ' + T(d.net(row)) + ' t', amount: d.billTotal(row), records: { orders: [row], payments: d.paymentsFor(row.id) } };
+    }
+    if (key === 'customers') {
+      const ids = new Set(D.orders.filter((o) => o.custId === row.id).map((o) => o.id));
+      return {
+        kind: 'Credit party', label: row.name + ' (' + row.code + ') with ' + ids.size + ' load(s)', amount: d.outstanding(row),
+        records: { customers: [row], orders: D.orders.filter((o) => ids.has(o.id)), payments: D.payments.filter((p) => ids.has(p.ticketId) || (!p.ticketId && p.custId === row.id)), rates: D.rates.filter((r) => r.custId === row.id) },
+      };
+    }
+    if (key === 'materials') return { kind: 'Material', label: row.name, records: { materials: [row], rates: D.rates.filter((r) => r.matId === row.id) } };
+    if (key === 'payments') return { kind: row.ticketId ? 'Payment' : 'Receipt', label: d.cust(row.custId).name + ' · ' + METHOD_LABEL[row.method] + ' · ' + row.date, amount: row.amount, records: { payments: [row] } };
+    if (key === 'rates') return { kind: 'Rate period', label: rateTarget(row.custId) + ' · ' + d.mat(row.matId).name + ' · ' + M(row.rate) + '/t · ' + periodLabel(row), records: { rates: [row] } };
+    if (key === 'staging') return { kind: 'Import row', label: row.serial + ' · ' + row.name + ' · ' + row.material + ' · ' + row.date, amount: row.amount, records: { staging: [row] } };
+    return { kind: KIND_NAME[key] || 'Record', label: row.name || row.ticket || row.head || row.code || row.id, amount: row.amount || null, records: { [key]: [row] } };
+  };
+
+  const askDelete = (row, key = cfg && cfg.key) => {
+    const entry = voidEntryFor(key, row);
+    set({
+      modal: { kind: 'delete', key, row, title: 'Delete ' + entry.kind.toLowerCase() + '?', kicker: entry.label, confirmLabel: 'Move to voided entries' },
+      form: { reason: '' },
+      errors: {},
+    });
+  };
+
+  const doDelete = () => {
+    const { key, row } = s.modal;
+    const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: String(s.form.reason || '').trim(), ...voidEntryFor(key, row) };
+    const drop = (list, items, idKey) => list.filter((x) => !items.some((y) => y[idKey] === x[idKey]));
+    set((st) => {
+      const db = { ...st.db, voided: [entry].concat(st.db.voided || []) };
+      Object.entries(entry.records).forEach(([k, items]) => { db[k] = drop(st.db[k] || [], items, k === 'staging' ? 'key' : 'id'); });
+      if (key === 'customers') db.suppliers = st.db.suppliers.map((p) => (p.linkedCustId === row.id ? { ...p, linkedCustId: '' } : p));
+      return { db, modal: null, ...(key === 'customers' && st.mod === 'party' ? { mod: 'customers' } : {}) };
+    });
+    toast(entry.kind + ' moved to Voided entries.');
+  };
+
+  const restoreEntry = (entry) => {
+    set((st) => {
+      const db = { ...st.db, voided: (st.db.voided || []).filter((e) => e.id !== entry.id) };
+      Object.entries(entry.records).forEach(([k, items]) => {
+        const idKey = k === 'staging' ? 'key' : 'id';
+        const have = new Set((st.db[k] || []).map((x) => x[idKey]));
+        db[k] = items.filter((x) => !have.has(x[idKey])).concat(st.db[k] || []);
+      });
+      return { db };
+    });
+    toast(entry.kind + ' restored.');
+  };
+
+  // ---- PDF reports ----
+  const openReport = (custId, type, range = {}) => set({
+    modal: { kind: 'report', custId, title: custId ? 'Generate report — ' + d.cust(custId).name : 'All credit parties report', kicker: 'PDF report', confirmLabel: 'Download PDF' },
+    form: { type: type || 'statement', copy: 'party', fromDate: range.fromDate || '', fromTime: range.fromTime || '', toDate: range.toDate || '', toTime: range.toTime || '' },
+    errors: {},
+  });
+
+  const makeReport = async () => {
+    const f = s.form;
+    const from = f.fromDate ? f.fromDate + ' ' + (f.fromTime || '00:00') : '';
+    const to = f.toDate ? f.toDate + ' ' + (f.toTime || '23:59') : '';
+    if (from && to && to < from) { set({ errors: { toDate: 'The end is before the start.' } }); return; }
+    const { partyReport, allPartiesReport } = await import('./lib/report');
+    if (s.modal.custId) await partyReport({ d, party: d.cust(s.modal.custId), type: f.type, from, to, copy: f.copy });
+    else await allPartiesReport({ d, from, to });
+    set({ modal: null });
+    toast('Report downloaded.');
+  };
 
   const openAdd = () => {
     if (!cfg) return;
@@ -385,40 +471,6 @@ export default function App() {
     const f = {};
     c.fields.forEach((x) => { f[x.k] = row[x.k] == null ? '' : row[x.k]; });
     set({ modal: { kind: 'form', cfgMod: mod, id: row.id, title: 'Edit ' + (row.name || row.ticket || 'record'), kicker: 'Update', confirmLabel: 'Save changes' }, form: f, errors: {} });
-  };
-
-  // Records that tickets or rates still point at are kept; staff set them On hold / Inactive / Paused instead.
-  const deleteBlocker = (key, row) => {
-    const used = (n, what) => (n ? row.name + ' has ' + n + ' ' + what + '. Set the status instead of deleting, so history stays intact.' : null);
-    if (key === 'customers') return used(s.db.orders.filter((o) => o.custId === row.id).length + s.db.onsite.filter((o) => o.custId === row.id).length, 'ticket(s)');
-    if (key === 'materials') return used(s.db.orders.filter((o) => o.matId === row.id).length + s.db.rates.filter((r) => r.matId === row.id).length, 'ticket(s) or rate period(s)');
-    return null;
-  };
-
-  const askDelete = (row) => {
-    const blocked = deleteBlocker(cfg.key, row);
-    if (blocked) { toast(blocked); return; }
-    set({
-      modal: {
-        kind: 'delete', id: row.id, key: cfg.key, title: 'Delete ' + (row.name || row.ticket || 'this record') + '?', kicker: 'Confirm', confirmLabel: 'Delete',
-        message: 'This removes the entry from ' + MODS[s.mod].title + '. Linked reports will recalculate.',
-      },
-    });
-  };
-
-  const doDelete = () => {
-    const m = s.modal;
-    set((st) => ({
-      db: {
-        ...st.db,
-        [m.key]: st.db[m.key].filter((r) => r.id !== m.id),
-        // A party's own rate periods go with it.
-        rates: m.key === 'customers' ? st.db.rates.filter((r) => r.custId !== m.id) : st.db.rates,
-        suppliers: m.key === 'customers' ? st.db.suppliers.map((p) => (p.linkedCustId === m.id ? { ...p, linkedCustId: '' } : p)) : st.db.suppliers,
-      },
-      modal: null,
-    }));
-    toast('Record deleted.');
   };
 
   // ---- rate periods (₹ per ton) ----
@@ -471,19 +523,6 @@ export default function App() {
     toast(d.mat(card.matId).name + ' at ' + M(card.rate) + '/t now ends ' + to + '.');
   };
 
-  const askDeleteRate = (card) => set({
-    modal: {
-      kind: 'deleteRate', id: card.id, title: 'Delete this rate period?', kicker: rateTarget(card.custId), confirmLabel: 'Delete',
-      message: d.mat(card.matId).name + ' at ' + M(card.rate) + '/t, ' + periodLabel(card) + '. Tickets in these dates will be repriced at whatever rate applies without it.',
-    },
-  });
-
-  const deleteRate = () => {
-    const id = s.modal.id;
-    set((st) => ({ db: { ...st.db, rates: st.db.rates.filter((r) => r.id !== id) }, modal: null }));
-    toast('Rate period deleted.');
-  };
-
   const onRowAction = (kind, row) => {
     if (kind === 'party') openParty(row.id);
     else if (kind === 'stdrates') set({ mod: 'stdrates', modal: null });
@@ -495,16 +534,23 @@ export default function App() {
   const postReceipt = () => {
     const m = s.modal;
     const f = s.form;
-    const amt = +f.amount;
+    const amt = round2(f.amount);
     const c = d.cust(m.id);
-    if (!amt || amt <= 0) return set({ errors: { amount: 'Enter an amount greater than zero.' } });
-    if (amt > d.outstanding(c)) return set({ errors: { amount: 'Exceeds the outstanding balance of ' + M(d.outstanding(c)) + '.' } });
-    set((st) => ({
-      db: { ...st.db, customers: st.db.customers.map((x) => (x.id === m.id ? { ...x, received: x.received + amt, last: f.date } : x)) },
-      modal: null,
-    }));
-    toast(M(amt) + ' received from ' + c.name + ' by ' + f.method + '.');
-    return undefined;
+    const errs = {};
+    if (!(amt > 0)) errs.amount = 'Enter an amount greater than zero.';
+    else if (amt > round2(d.outstanding(c)) + 0.005) errs.amount = 'More than the outstanding ' + M(d.outstanding(c)) + '.';
+    if (!f.to) errs.to = 'Choose who received the money.';
+    if (f.to === 'other' && !String(f.toName || '').trim()) errs.toName = 'Type who received it.';
+    if (!f.date) errs.date = 'Required.';
+    if (Object.keys(errs).length) { set({ errors: errs }); return; }
+    const toSupplier = f.to.startsWith('S:');
+    const rec = {
+      id: 'YR' + Date.now(), date: f.date, time: f.time || hhmm(), ticketId: '', custId: c.id, walkIn: '',
+      method: f.method, amount: amt, toType: toSupplier ? 'supplier' : f.to, supplierId: toSupplier ? f.to.slice(2) : '',
+      toName: f.to === 'other' ? String(f.toName).trim() : '', ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: SIGNED_IN_AS,
+    };
+    set((st) => ({ db: { ...st.db, payments: st.db.payments.concat([rec]) }, modal: null }));
+    toast(M(amt) + ' received from ' + c.name + ' by ' + METHOD_LABEL[f.method] + ' → ' + paidToLabel(rec, (id) => d.supplier(id).name) + '.');
   };
 
   const save = () => {
@@ -522,6 +568,7 @@ export default function App() {
     const newOrder = c.key === 'orders' && !m.id
       ? { id: 'N' + Date.now(), ticket: 'WB-' + s.seq, dir: 'OUT', time: hhmm(), by: SIGNED_IN_AS, method: 'Credit', roundOff: 0, payRemarks: '', walkIn: '', ...rec }
       : null;
+    const editedOrder = c.key === 'orders' && m.id ? { ...s.db.orders.find((o) => o.id === m.id), ...rec } : null;
     set((st) => {
       const list = st.db[c.key] || [];
       if (m.id) return { db: { ...st.db, [c.key]: list.map((r) => (r.id === m.id ? { ...r, ...rec } : r)) }, modal: null };
@@ -533,8 +580,13 @@ export default function App() {
       return { db: { ...st.db, [c.key]: [{ id: 'N' + Date.now(), ...extra, ...rec }].concat(list) }, modal: null };
     });
     if (newOrder && newOrder.status !== 'Void') {
-      const bill = d.amount(newOrder);
+      const bill = d.billTotal(newOrder);
       openPay({ source: 'ticket', ticket: newOrder, bill, walkIn: false, title: newOrder.ticket + ' — ' + d.cust(newOrder.custId).name, initial: defaultPay(bill, { walkIn: false, cashSerial: false }) });
+      return;
+    }
+    // Editing a load goes straight on to its payment, since GST, rent or the rate may have changed the bill.
+    if (editedOrder && editedOrder.status !== 'Void') {
+      openTicketPay(editedOrder);
       return;
     }
     toast(m.id ? (rec.name || rec.ticket || 'Record') + ' updated.' : (rec.name || (newOrder && newOrder.ticket) || 'Record') + ' created.');
@@ -556,13 +608,30 @@ export default function App() {
       const now = d.rateFor(m.custId, s.form.matId, s.form.from);
       return now.rate ? 'On ' + s.form.from + ' the rate is ' + M(now.rate) + '/t (' + now.src + ')' : 'No rate is set for ' + s.form.from + ' yet';
     };
+    const toOptions = [{ v: 'company', l: 'Company account' }]
+      .concat(s.db.suppliers.filter((p) => p.status !== 'Inactive').map((p) => ({ v: 'S:' + p.id, l: p.name + ' (soling supplier)' })))
+      .concat([{ v: 'other', l: 'Someone else…' }]);
+    const range = (from) => [
+      { k: from ? 'fromDate' : 'toDate', label: from ? 'From date' : 'To date', type: 'date', hint: from ? 'Blank = from the first entry' : 'Blank = up to now' },
+      { k: from ? 'fromTime' : 'toTime', label: from ? 'From time' : 'To time', type: 'time' },
+    ];
     const fields = formCfg ? formCfg.fields
       : m.kind === 'receipt' ? [
-        { k: 'amount', label: 'Amount received', type: 'number', hint: 'Outstanding ' + M(d.outstanding(d.cust(m.id))) },
+        { k: 'amount', label: 'Amount received (₹)', type: 'number', hint: 'Outstanding ' + M(d.outstanding(d.cust(m.id))) },
         { k: 'method', label: 'Method', type: 'select', options: RECEIPT_METHODS },
-        { k: 'date', label: 'Receipt date', type: 'date' },
-        { k: 'ref', label: 'Reference / UTR', span: 'span 2' },
+        { k: 'to', label: 'Paid to', type: 'select', options: toOptions, hint: 'Who received the money — shown only on company copies' },
+        ...(s.form.to === 'other' ? [{ k: 'toName', label: 'Received by', placeholder: 'Name of the person' }] : []),
+        { k: 'date', label: 'Date', type: 'date' },
+        { k: 'time', label: 'Time', type: 'time' },
+        { k: 'ref', label: 'Reference / UTR / cheque no.' },
+        { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
       ]
+        : m.kind === 'delete' ? [{ k: 'reason', label: 'Reason', span: 'span 2', hint: 'Optional — it moves to Voided entries and can be restored from there' }]
+          : m.kind === 'report' ? [
+            ...(m.custId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (loads + payments)' }, { v: 'loads', l: 'Loads taken' }, { v: 'payments', l: 'Payment history' }] }] : []),
+            ...(m.custId ? [{ k: 'copy', label: 'Copy for', type: 'select', options: [{ v: 'party', l: 'The party (hides who received payments)' }, { v: 'company', l: 'Company (shows who received payments)' }] }] : []),
+            ...range(true), ...range(false),
+          ]
         : m.kind === 'rate' ? [
           { k: 'matId', label: 'Material', type: 'select', options: rateMats },
           { k: 'rate', label: 'Rate (₹ per ton)', type: 'number', placeholder: '800', hint: rateHint() },
@@ -580,8 +649,13 @@ export default function App() {
       setField: (k, v) => set((st) => ({ form: { ...st.form, [k]: v }, errors: { ...st.errors, [k]: null } })),
       calcLines: formCfg && formCfg.calc ? formCfg.calc(s.form) : null,
       onConfirm: {
-        delete: doDelete, void: doVoid, receipt: postReceipt, rate: saveRate, endRate, deleteRate,
-        clearStaging: () => { set((st) => ({ db: { ...st.db, staging: [] }, modal: null })); toast('Pending rows cleared.'); },
+        delete: doDelete, void: doVoid, receipt: postReceipt, rate: saveRate, endRate, report: makeReport,
+        clearStaging: () => {
+          const rows = s.db.staging;
+          const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
+          set((st) => ({ db: { ...st.db, staging: [], voided: [entry].concat(st.db.voided || []) }, modal: null }));
+          toast('Pending rows moved to Voided entries.');
+        },
       }[m.kind] || save,
       onClose: closeModal,
     };
@@ -593,7 +667,7 @@ export default function App() {
   const meta = party
     ? { ...MODS.party, title: party.name, sub: [party.owner && 'Owner ' + party.owner, party.contact, party.address].filter(Boolean).join(' · ') || 'Credit party — add owner, contact and address with Edit details.' }
     : MODS[s.mod] || MODS.dashboard;
-  const atStation = s.mod === 'weighbridge' || s.mod === 'dashboard' || s.mod === 'import';
+  const atStation = ['weighbridge', 'dashboard', 'import', 'voids'].includes(s.mod);
   const onRates = s.mod === 'party' || s.mod === 'stdrates';
   const filters = { q: s.q, status: s.status, from: s.from, to: s.to, sortK: s.sortK, sortDir: s.sortDir };
   const tonsToday = s.db.orders.filter((o) => o.status !== 'Void' && o.date === TODAY).reduce((a, o) => a + d.net(o), 0);
@@ -611,7 +685,7 @@ export default function App() {
             tons={T(tonsToday) + ' t'}
             now={s.now}
             onWeighbridge={() => go('weighbridge')}
-            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : 'New entry'}
+            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : s.mod === 'customers' ? 'New credit party' : 'New entry'}
             onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : openAdd}
           />
           <main
@@ -629,8 +703,14 @@ export default function App() {
                 onEdit={() => openEdit(party, 'customers')}
                 onAddRate={(matId) => openRate(party.id, matId)}
                 onEndRate={askEndRate}
-                onDeleteRate={askDeleteRate}
+                onDeleteRate={(card) => askDelete(card, 'rates')}
                 onOpenSuppliers={() => go('suppliers')}
+                onEditLoad={(o) => openEdit(o, 'orders')}
+                onPayLoad={openTicketPay}
+                onDeleteLoad={(o) => askDelete(o, 'orders')}
+                onReceipt={() => openReceipt(party)}
+                onDeleteReceipt={(p) => askDelete(p, 'payments')}
+                onReport={(type, range) => openReport(party.id, type, range)}
               />
             )}
             {s.mod === 'party' && !party && (
@@ -653,7 +733,7 @@ export default function App() {
               />
             )}
             {s.mod === 'stdrates' && (
-              <StandardRates d={d} onBack={() => go('materials')} onAddRate={(matId) => openRate('', matId)} onEndRate={askEndRate} onDeleteRate={askDeleteRate} />
+              <StandardRates d={d} onBack={() => go('materials')} onAddRate={(matId) => openRate('', matId)} onEndRate={askEndRate} onDeleteRate={(card) => askDelete(card, 'rates')} />
             )}
             {s.mod === 'weighbridge' && (
               <Weighbridge
@@ -668,7 +748,11 @@ export default function App() {
                 onCancel={cancelOut}
               />
             )}
-            {cfg && (
+            {s.mod === 'customers' && (
+              <CreditParties d={d} onOpen={openParty} onAdd={openAdd} onReport={() => openReport('', 'statement')} />
+            )}
+            {s.mod === 'voids' && <VoidedEntries d={d} onRestore={restoreEntry} onReinstate={reinstate} />}
+            {cfg && !CUSTOM_LISTS.includes(s.mod) && (
               <ListModule
                 key={s.mod}
                 mod={s.mod}

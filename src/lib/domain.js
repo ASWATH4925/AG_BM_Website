@@ -65,22 +65,53 @@ export function createDomain(db) {
   const matLabel = (o) => (o.matId === OTHER_MATERIAL && o.matName ? o.matName + ' (other)' : mat(o.matId).name);
 
   const net = (o) => Math.max(0, (o.gross || 0) - (o.tare || 0)) / 1000;
+  // Material value = net tons × rate per ton. The bill adds the GST and rent amounts staff entered for that load.
   const amount = (o) => net(o) * orderRate(o).rate;
+  const extras = (o) => (+o.gst || 0) + (+o.rent || 0);
+  const billTotal = (o) => amount(o) + extras(o);
   const partyLabel = (o) => (o.custId ? cust(o.custId).name : (o.walkIn || 'Walk-in') + ' (walk-in)');
 
-  // Payments recorded against a ticket, and what is still on credit after them.
+  // Payments are either against a load (ticketId) or a receipt on the party's account (no ticketId).
   const payments = db.payments || [];
   const paymentsFor = (ticketId) => payments.filter((p) => p.ticketId === ticketId);
-  const paidOn = (o) => paymentsFor(o.id).reduce((s, p) => s + p.amount, 0);
+  const receiptsOf = (custId) => payments.filter((p) => !p.ticketId && p.custId === custId);
+  const legacyPaid = (o) => !paymentsFor(o.id).length && isPaidMethod(o.method);
+  const paidOn = (o) => (legacyPaid(o) ? billTotal(o) : paymentsFor(o.id).reduce((s, p) => s + p.amount, 0));
   const onCredit = (o) => {
-    if (o.status === 'Void' || !o.custId) return 0;
-    const recs = paymentsFor(o.id);
-    if (!recs.length && isPaidMethod(o.method)) return 0;
-    return Math.max(0, amount(o) - paidOn(o) - (+o.roundOff || 0));
+    if (o.status === 'Void' || !o.custId || legacyPaid(o)) return 0;
+    return Math.max(0, billTotal(o) - paidOn(o) - (+o.roundOff || 0));
   };
-  // Billed on credit = what each of the party's tickets left on credit, at the rate in force on its date.
-  const billed = (c) => db.orders.filter((o) => o.custId === c.id).reduce((s, o) => s + onCredit(o), 0);
-  const outstanding = (c) => Math.max(0, billed(c) - (c.received || 0));
+  const loadsOf = (custId) => db.orders.filter((o) => o.custId === custId && o.status !== 'Void');
+  // Billed on credit = what each load left on credit; received = receipts on the account.
+  const billed = (c) => loadsOf(c.id).reduce((s, o) => s + onCredit(o), 0);
+  const received = (c) => receiptsOf(c.id).reduce((s, p) => s + p.amount, 0);
+  const outstanding = (c) => Math.max(0, billed(c) - received(c));
+  const lastReceipt = (c) => receiptsOf(c.id).map((p) => p.date).sort().pop() || '—';
+
+  // Account ledger for a statement: every load (debit) and every payment, round-off and receipt (credit), in time order.
+  // from / to are 'YYYY-MM-DD HH:MM' strings; entries before `from` roll into the opening balance.
+  const stamp = (x) => x.date + ' ' + (x.time || '00:00');
+  const ledger = (custId, from = '', to = '') => {
+    const rows = [];
+    loadsOf(custId).forEach((o) => {
+      rows.push({ ts: stamp(o), kind: 'load', o, ref: o.ticket, debit: billTotal(o), credit: 0 });
+      if (legacyPaid(o)) rows.push({ ts: stamp(o), kind: 'pay', o, ref: o.ticket, method: o.method, debit: 0, credit: billTotal(o) });
+      paymentsFor(o.id).forEach((p) => rows.push({ ts: stamp(p), kind: 'pay', o, p, ref: o.ticket, method: p.method, debit: 0, credit: p.amount }));
+      if (+o.roundOff) rows.push({ ts: stamp(o), kind: 'round', o, ref: o.ticket, debit: 0, credit: +o.roundOff });
+    });
+    receiptsOf(custId).forEach((p) => rows.push({ ts: stamp(p), kind: 'receipt', p, ref: p.ref || 'Receipt', method: p.method, debit: 0, credit: p.amount }));
+    rows.sort((a, b) => a.ts.localeCompare(b.ts) || (a.kind === 'load' ? -1 : 1));
+    let opening = 0;
+    const inRange = [];
+    rows.forEach((r) => {
+      if (from && r.ts < from) opening += r.debit - r.credit;
+      else if (!to || r.ts <= to) inRange.push(r);
+    });
+    let bal = opening;
+    inRange.forEach((r) => { bal += r.debit - r.credit; r.balance = bal; });
+    const sum = (k) => inRange.reduce((s, r) => s + r[k], 0);
+    return { opening, rows: inRange, debit: sum('debit'), credit: sum('credit'), closing: bal };
+  };
   const hours = (a) => {
     if (!a.in || a.in === '—') return 0;
     const p = (t) => {
@@ -103,7 +134,8 @@ export function createDomain(db) {
 
   return {
     db, cust, supplier, mat, emp, salesMaterials, rateFor, orderRate, matLabel,
-    net, amount, partyLabel, paymentsFor, paidOn, onCredit, billed, outstanding, hours, advanceBalance, payLine,
+    net, amount, extras, billTotal, partyLabel, paymentsFor, receiptsOf, paidOn, onCredit, loadsOf, billed, received, outstanding, lastReceipt, ledger,
+    hours, advanceBalance, payLine,
   };
 }
 

@@ -1,4 +1,4 @@
-// Yard settings. Bills are net tons × rate per ton — no loading charge or GST.
+// Yard settings. Material is billed as net tons × rate per ton; staff add any GST or rent amount per load.
 export const settings = {
   companyName: 'AG BlueMetals',
   liveScale: true,

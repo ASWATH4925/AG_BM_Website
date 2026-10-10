@@ -17,7 +17,7 @@ export default function PaymentEditor({ title, sub, bill, walkIn, initial, suppl
 
   useEffect(() => {
     ref.current?.querySelector('.ag-seg-on')?.focus();
-    const onKey = (e) => { if (e.key === 'Escape' && !ref.current?.querySelector('.ag-menu')) closeRef.current(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.ag-menu-float')) closeRef.current(); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
@@ -177,7 +177,7 @@ export default function PaymentEditor({ title, sub, bill, walkIn, initial, suppl
 
           <div style={{ border: '1px solid var(--color-neutral-300)', padding: 'var(--space-3)', background: 'var(--color-neutral-100)' }}>
             {[
-              ['Bill (net tons × rate)', M(bill)],
+              ['Bill', M(bill)],
               ['Paid now', M(result.paid)],
               ...(result.roundOff ? [['Round-off', '− ' + M(result.roundOff)]] : []),
               [walkIn ? 'Still to collect' : 'On credit', M(result.credit)],

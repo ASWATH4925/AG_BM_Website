@@ -12,7 +12,7 @@ export default function Modal({ modal, fields, form, errors, setField, calcLines
     const prev = document.activeElement;
     const first = ref.current?.querySelector('input, button.ag-sel') || ref.current?.querySelector('.btn-primary');
     first?.focus();
-    const onKey = (e) => { if (e.key === 'Escape' && !ref.current?.querySelector('.ag-menu')) closeRef.current(); };
+    const onKey = (e) => { if (e.key === 'Escape' && !document.querySelector('.ag-menu-float')) closeRef.current(); };
     window.addEventListener('keydown', onKey);
     return () => { window.removeEventListener('keydown', onKey); prev?.focus?.(); };
   }, []);
@@ -44,7 +44,7 @@ export default function Modal({ modal, fields, form, errors, setField, calcLines
         </div>
 
         <div style={{ padding: 'var(--space-4)' }}>
-          {!isForm && <p style={{ margin: 0, fontSize: 14 }}>{modal.message}</p>}
+          {modal.message && <p style={{ margin: isForm ? '0 0 var(--space-3)' : 0, fontSize: 14 }}>{modal.message}</p>}
           {isForm && (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(210px,100%),1fr))', gap: 'var(--space-3)' }}>
@@ -52,14 +52,14 @@ export default function Modal({ modal, fields, form, errors, setField, calcLines
                   const value = form[f.k] == null ? '' : form[f.k];
                   const err = errors[f.k];
                   return (
-                    <Field key={f.k} label={f.label} as={f.type === 'select' ? 'div' : 'label'} style={{ gridColumn: f.span || 'auto' }}>
+                    <Field key={f.k} label={f.label} as={f.type === 'select' ? 'div' : 'label'} style={{ gridColumn: f.span ? '1 / -1' : 'auto', minWidth: 0 }}>
                       {f.type === 'select' ? (
                         <Select label={f.label} value={value} options={f.options || []} onChange={(v) => setField(f.k, v)} />
                       ) : (
                         <input
                           className="input"
                           style={{ width: '100%' }}
-                          type={f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text'}
+                          type={['number', 'date', 'time'].includes(f.type) ? f.type : 'text'}
                           placeholder={f.placeholder || ''}
                           value={value}
                           aria-invalid={err ? true : undefined}

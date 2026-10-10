@@ -155,12 +155,23 @@ export const SEED_NEXT_TICKET = 24118;
 
 export function seedDb() {
   return JSON.parse(JSON.stringify({
-    customers: cust, suppliers, materials: mats, rates, orders: ord, payments, purchases, staging: [], imports: [],
+    customers: cust, suppliers, materials: mats, rates, orders: ord, payments, purchases, staging: [], imports: [], voided: [],
     employees: emp, attendance: att, advances: adv, payroll: pay, expenses: exp, onsite,
   }));
 }
 
 // Fills in collections added after a browser first saved its data, so older saves keep working.
-export function upgradeDb(db) {
-  return { payments: [], purchases: [], staging: [], imports: [], suppliers: [], ...db };
+export function upgradeDb(saved) {
+  const db = { payments: [], purchases: [], staging: [], imports: [], suppliers: [], voided: [], ...saved };
+  // Older saves kept a party's receipts as one running total; turn it into a receipt record so it shows in payment history.
+  const receipts = [];
+  db.customers = db.customers.map((c) => {
+    if (!(+c.received > 0)) return c;
+    receipts.push({
+      id: 'YR-' + c.id, date: c.last && c.last !== '—' ? c.last : '2026-10-01', time: '00:00', ticketId: '', custId: c.id, walkIn: '',
+      method: 'Cash', amount: +c.received, toType: 'company', supplierId: '', toName: '', ref: 'Earlier receipts', remarks: 'Carried over from the earlier total', by: 'System',
+    });
+    return { ...c, received: 0 };
+  });
+  return { ...db, payments: db.payments.concat(receipts) };
 }

@@ -119,7 +119,7 @@ export default function Dashboard({ d, tab, setTab, go }) {
                       <div className="ag-track ag-track-bar">
                         <div className="ag-fill" style={{ background: color, width: Math.round((o / maxC) * 100) + '%' }} />
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', marginTop: 4 }}>{share}% of all outstanding · last receipt {c.last}</div>
+                      <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', marginTop: 4 }}>{share}% of all outstanding · last receipt {d.lastReceipt(c)}</div>
                     </div>
                   );
                 })}
@@ -219,8 +219,8 @@ export default function Dashboard({ d, tab, setTab, go }) {
                         <td style={{ fontWeight: 600 }}>{c.name}</td>
                         <td className="ag-tabular" style={{ textAlign: 'right', fontWeight: 600 }}>{M(o)}</td>
                         <td className="ag-tabular" style={{ textAlign: 'right', color: 'var(--color-neutral-700)' }}>{M(d.billed(c))}</td>
-                        <td className="ag-tabular" style={{ textAlign: 'right', color: 'var(--color-neutral-700)' }}>{M(c.received || 0)}</td>
-                        <td style={{ color: 'var(--color-neutral-700)' }}>{c.last}</td>
+                        <td className="ag-tabular" style={{ textAlign: 'right', color: 'var(--color-neutral-700)' }}>{M(d.received(c))}</td>
+                        <td style={{ color: 'var(--color-neutral-700)' }}>{d.lastReceipt(c)}</td>
                         <td><Tag>{o > 0 ? 'Due' : 'Clear'}</Tag></td>
                       </tr>
                     );

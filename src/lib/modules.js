@@ -8,7 +8,7 @@ export const MODS = {
   weighbridge: { label: 'Weighbridge', group: 'Operations', title: 'Weighbridge station', sub: 'Capture tare on entry, gross on exit. Net weight and price compute themselves.' },
   import: { label: 'Register Import', group: 'Operations', title: 'Register import', sub: 'Load the weighbridge register, check each row and record how it was paid.' },
   orders: { label: 'Orders', group: 'Operations', title: 'Orders & transactions', sub: 'Every sale, priced at net tons × the rate per ton in force on its date, with how it was paid.' },
-  voids: { label: 'Void Orders', group: 'Operations', title: 'Void orders', sub: 'Cancelled loads and why they were cancelled.' },
+  voids: { label: 'Voided Entries', group: 'Operations', title: 'Voided entries', sub: 'Everything deleted or cancelled — who did it, when and why. Any entry can be restored.' },
   customers: { label: 'Credit Parties', group: 'Masters', title: 'Credit parties', sub: 'Everyone who takes material on credit — owner, address, contact and their own ton rates.' },
   suppliers: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling suppliers', sub: 'Boulder suppliers we buy from and owe money to. Kept apart from credit parties.' },
   materials: { label: 'Materials', group: 'Masters', title: 'Materials', sub: 'What we sell and buy, and the standard rate per ton for each period.' },
@@ -128,8 +128,8 @@ export function moduleConfig(mod, d) {
             { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.partyLabel(o) },
             { k: '_m', label: 'Material', get: (o) => d.matLabel(o) }, { k: 'vehicle', label: 'Vehicle' },
             { k: '_n', label: 'Net (t)', t: 'num2', get: (o) => d.net(o) }, { k: '_r', label: 'Rate / t', t: 'money', get: (o) => d.orderRate(o).rate },
-            { k: '_a', label: 'Amount', t: 'money', get: (o) => d.amount(o) },
-            { k: '_p', label: 'Paid', t: 'money', get: (o) => (d.paymentsFor(o.id).length ? d.paidOn(o) : d.onCredit(o) ? 0 : d.amount(o)) },
+            { k: '_a', label: 'Bill', t: 'money', get: (o) => d.billTotal(o) },
+            { k: '_p', label: 'Paid', t: 'money', get: (o) => d.paidOn(o) },
             { k: '_oc', label: 'On credit', t: 'money', get: (o) => d.onCredit(o) },
             { k: 'method', label: 'Payment' }, { k: 'status', label: 'Status', t: 'tag' },
           ],
@@ -140,6 +140,8 @@ export function moduleConfig(mod, d) {
         { k: 'matName', label: 'Material name', hint: 'Only for Other — type what was loaded' },
         { k: 'vehicle', label: 'Vehicle number', req: 1 },
         { k: 'tare', label: 'Tare weight (kg)', type: 'number', req: 1 }, { k: 'gross', label: 'Gross weight (kg)', type: 'number', req: 1 },
+        { k: 'gst', label: 'GST amount (₹)', type: 'number', hint: 'Added to the bill for this load. Leave blank if none.' },
+        { k: 'rent', label: 'Rent (₹)', type: 'number', hint: 'Vehicle rent the party pays on this load' },
         { k: 'manualRate', label: 'Manual rate (₹ / ton)', type: 'number', hint: 'Leave blank to use the rate card for this date. Payment is recorded after saving.' },
         { k: 'status', label: 'Status', type: 'select', options: opts(['Completed', 'In Transit', 'Void']) },
         { k: 'reason', label: 'Void reason', span: 'span 2', hint: 'Required when the status is Void' },
@@ -161,7 +163,9 @@ export function moduleConfig(mod, d) {
         return [
           { label: 'Net weight', value: T(d.net(o)) + ' t' },
           { label: 'Rate (' + r.src + ')', value: M(r.rate) + ' / t' },
-          { label: 'Amount (net tons × rate)', value: M(d.amount(o)) },
+          { label: 'Material value (net tons × rate)', value: M(d.amount(o)) },
+          { label: 'GST + rent', value: M((+f.gst || 0) + (+f.rent || 0)) },
+          { label: 'Bill', value: M(d.amount(o) + (+f.gst || 0) + (+f.rent || 0)) },
         ];
       },
       foot: (rows) => (isVoid
@@ -173,15 +177,14 @@ export function moduleConfig(mod, d) {
   if (mod === 'payments') return {
     key: 'customers', add: 'Record receipt', statusKey: '_ag', statuses: ['All', 'Clear', 'Due'],
     cols: [
-      { k: 'name', label: 'Credit party' }, { k: '_b', label: 'Billed', t: 'money', get: (c) => d.billed(c) }, { k: 'received', label: 'Received', t: 'money' },
+      { k: 'name', label: 'Credit party' }, { k: '_b', label: 'Billed', t: 'money', get: (c) => d.billed(c) }, { k: '_rc', label: 'Received', t: 'money', get: (c) => d.received(c) },
       { k: '_out', label: 'Outstanding', t: 'money', get: (c) => d.outstanding(c) },
-      { k: 'last', label: 'Last receipt' },
+      { k: '_lr', label: 'Last receipt', get: (c) => d.lastReceipt(c) },
       { k: '_ag', label: 'Standing', t: 'tag', get: (c) => (d.outstanding(c) === 0 ? 'Clear' : 'Due') },
     ],
     rowAction: { label: 'Receipt', kind: 'receipt' },
     fields: [
       { k: 'name', label: 'Party name', req: 1, span: 'span 2' },
-      { k: 'received', label: 'Total received', type: 'number' }, { k: 'last', label: 'Last receipt', type: 'date' },
     ],
     foot: (rows) => 'Total outstanding: ' + M(rows.reduce((s, c) => s + d.outstanding(c), 0)),
   };
@@ -292,7 +295,7 @@ export function listKpis(mod, rows, d) {
     ],
     payments: () => [
       { label: 'Billed', value: M(sum(rows, d.billed)), note: 'Credit tickets, filtered parties' },
-      { label: 'Received', value: M(sum(rows, (x) => x.received)), note: 'Cash, UPI and transfers' },
+      { label: 'Received', value: M(sum(rows, d.received)), note: 'Receipts on account' },
       { label: 'Outstanding', value: M(sum(rows, d.outstanding)), note: rows.filter((x) => d.outstanding(x) > 0).length + ' parties' },
     ],
     voids: () => [

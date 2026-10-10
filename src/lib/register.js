@@ -29,8 +29,11 @@ function num(v) {
 
 function parseDate(text) {
   const m = String(text).match(/(\d{1,2})[-/ ]([A-Za-z]{3})[A-Za-z]*[-/ ](\d{4})/);
-  if (!m || !MONTHS[m[2].toUpperCase()]) return '';
-  return m[3] + '-' + pad2(MONTHS[m[2].toUpperCase()]) + '-' + pad2(+m[1]);
+  if (m && MONTHS[m[2].toUpperCase()]) return m[3] + '-' + pad2(MONTHS[m[2].toUpperCase()]) + '-' + pad2(+m[1]);
+  // Numeric dates are day first (09/10/2026 = 9 Oct).
+  const n = String(text).match(/(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/);
+  if (n && +n[2] >= 1 && +n[2] <= 12) return n[3] + '-' + pad2(+n[2]) + '-' + pad2(+n[1]);
+  return '';
 }
 
 function parseTime(v) {
