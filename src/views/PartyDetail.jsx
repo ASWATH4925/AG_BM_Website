@@ -62,7 +62,7 @@ export function Empty({ children }) {
 // One credit party's account: loads, payments, statement, rates and contact details.
 export default function PartyDetail({
   d, party, tab, setTab, onBack, onEdit, onAddRate, onEndRate, onDeleteRate, onOpenSuppliers,
-  onEditLoad, onPayLoad, onDeleteLoad, onReceipt, onDeleteReceipt, onReport,
+  onEditLoad, onPayLoad, onDeleteLoad, onReceipt, onDeleteReceipt, onReport, onAddLoad,
 }) {
   const [range, setRange] = useState({ fromDate: '', fromTime: '', toDate: '', toTime: '' });
   const { from, to } = rangeStamps(range);
@@ -88,6 +88,7 @@ export default function PartyDetail({
           </div>
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-secondary" onClick={() => onReport('statement', range)}>Generate report</button>
+            <button type="button" className="btn btn-secondary" onClick={onAddLoad}>Add load</button>
             <button type="button" className="btn btn-primary" onClick={onReceipt}>Record payment</button>
           </div>
         </div>
@@ -109,7 +110,10 @@ export default function PartyDetail({
 
       {current === 'Loads taken' && (
         <div className="ag-glass ag-rise">
-          <RangeBar range={range} setRange={setRange}>{reportBtn('loads', 'Generate report')}</RangeBar>
+          <RangeBar range={range} setRange={setRange}>
+            <button type="button" className="btn btn-secondary" onClick={onAddLoad}>Add load</button>
+            {reportBtn('loads', 'Generate report')}
+          </RangeBar>
           <div style={{ overflowX: 'auto' }}>
             <table className="table" style={{ width: '100%', minWidth: 1280 }}>
               <thead>

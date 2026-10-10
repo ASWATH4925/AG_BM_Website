@@ -77,6 +77,7 @@ export default function SolingSuppliers({ d, onOpen, onAdd, onReport }) {
             </div>
             <div style={{ fontSize: 11.5, color: 'var(--color-neutral-700)', marginTop: 6, textAlign: 'left' }}>
               {loads ? loads + ' load' + (loads === 1 ? '' : 's') + ' · last ' + last.slice(0, 10) : 'No soling loads yet'}
+              {' · '}{d.solRateFor(p.id).rate ? M(d.solRateFor(p.id).rate) + '/t' : 'no rate set'}
             </div>
           </button>
         ))}

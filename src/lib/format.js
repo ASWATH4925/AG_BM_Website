@@ -12,3 +12,7 @@ export function brandMark(name) {
   if (w[0].length >= 2 && w[0].length <= 3 && w[0] === w[0].toUpperCase()) return w[0];
   return w.map((x) => x[0]).join('').slice(0, 2).toUpperCase();
 }
+
+// Yard quantity unit: 1 unit = 4 tons.
+export const TONS_PER_UNIT = 4;
+export const U = (tons) => (Number(tons || 0) / TONS_PER_UNIT).toFixed(2);

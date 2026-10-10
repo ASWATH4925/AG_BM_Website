@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import Panel from '../components/Panel';
 import StatTile, { MinorTile } from '../components/StatTile';
 import Tag from '../components/Tag';
-import { TODAY, TODAY_LABEL } from '../config';
-import { M, N, T } from '../lib/format';
+import { TODAY } from '../config';
+import { isoDate, M, N, T, U } from '../lib/format';
+import { isPaidMethod, METHOD_LABEL } from '../lib/payments';
 
 const TABS = ['Overview', 'Yard', 'Ledger'];
 
@@ -12,34 +14,56 @@ function deltaOf(now, was) {
   return { delta: (p >= 0 ? '+' : '') + p + '%', deltaTag: p >= 0 ? 'ag-t-ok' : 'ag-t-bad' };
 }
 
-export default function Dashboard({ d, tab, setTab, go }) {
+const dayLabel = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+
+export default function Dashboard({ d, tab, setTab, go, onOpenParty }) {
   const D = d.db;
+  const [day, setDay] = useState(TODAY);
+  const isToday = day === TODAY;
+  const dayName = isToday ? 'today' : 'on ' + dayLabel(day);
   const done = D.orders.filter((o) => o.status !== 'Void');
-  const todays = done.filter((o) => o.date === TODAY);
+  const todays = done.filter((o) => o.date === day);
   const tons = todays.reduce((a, o) => a + d.net(o), 0);
-  const rev = todays.reduce((a, o) => a + d.amount(o), 0);
+  const rev = todays.reduce((a, o) => a + d.billTotal(o), 0);
   const outs = D.customers.reduce((a, c) => a + d.outstanding(c), 0);
-  const collected = (D.payments || []).filter((p) => p.date === TODAY).reduce((a, p) => a + p.amount, 0);
   const burn = D.expenses.filter((x) => x.type === 'Debit').reduce((a, x) => a + x.amount, 0)
     - D.expenses.filter((x) => x.type === 'Credit').reduce((a, x) => a + x.amount, 0);
   const duePay = D.payroll.filter((p) => p.status !== 'Paid').reduce((a, p) => a + d.payLine(p).net, 0);
-  const prevDate = done.map((o) => o.date).filter((x) => x < TODAY).sort().pop() || null;
+  const prevDate = done.map((o) => o.date).filter((x) => x < day).sort().pop() || null;
   const prev = prevDate ? done.filter((o) => o.date === prevDate) : [];
   const prevTons = prev.reduce((a, o) => a + d.net(o), 0);
-  const prevRev = prev.reduce((a, o) => a + d.amount(o), 0);
+  const prevRev = prev.reduce((a, o) => a + d.billTotal(o), 0);
+
+  // Money credit parties paid on the chosen day: payments on loads, receipts on account,
+  // and older loads marked paid without payment records (counted on the load's date).
+  const voidIds = new Set(D.orders.filter((o) => o.status === 'Void').map((o) => o.id));
+  const partyPays = (D.payments || []).filter((p) => p.custId && p.date === day && !voidIds.has(p.ticketId))
+    .map((p) => ({ custId: p.custId, amount: p.amount, method: p.method, p }))
+    .concat(todays.filter((o) => o.custId && !d.paymentsFor(o.id).length && isPaidMethod(o.method))
+      .map((o) => ({ custId: o.custId, amount: d.billTotal(o), method: o.method, p: null })));
+  const payers = Object.values(partyPays.reduce((acc, x) => {
+    const g = acc[x.custId] || (acc[x.custId] = { c: d.cust(x.custId), total: 0, methods: {}, toSup: [], count: 0 });
+    g.total += x.amount;
+    g.count += 1;
+    g.methods[x.method] = (g.methods[x.method] || 0) + x.amount;
+    if (x.p && x.p.toType === 'supplier') g.toSup.push(M(x.amount) + ' → ' + d.supplier(x.p.supplierId).name);
+    return acc;
+  }, {})).sort((a, b) => b.total - a.total);
+  const collected = payers.reduce((a, g) => a + g.total, 0);
+  const maxPay = Math.max(...payers.map((g) => g.total), 1);
 
   const heroKpis = [
-    { label: 'Tonnage today', value: T(tons) + ' t', note: todays.length + ' tickets closed' + (prevDate ? ' · against ' + T(prevTons) + ' t prior day' : ''), ...deltaOf(tons, prevTons) },
-    { label: 'Billed today', value: M(rev), note: 'Material value, before GST', ...deltaOf(rev, prevRev) },
+    { label: 'Sold ' + dayName, value: U(tons) + ' units', note: T(tons) + ' t · ' + todays.length + (todays.length === 1 ? ' load' : ' loads') + (prevDate ? ' · ' + U(prevTons) + ' units on ' + dayLabel(prevDate) : ''), ...deltaOf(tons, prevTons) },
+    { label: 'Billed ' + dayName, value: M(rev), note: 'Material value + GST + rent', ...deltaOf(rev, prevRev) },
+    { label: 'Paid by parties ' + dayName, value: M(collected), note: payers.length + ' credit part' + (payers.length === 1 ? 'y' : 'ies') + ' paid' },
     { label: 'Outstanding credit', value: M(outs), note: D.customers.filter((c) => d.outstanding(c) > 0).length + ' accounts carrying a balance' },
-    { label: 'On the bridge', value: String(D.onsite.length), note: D.onsite.length ? 'Awaiting weigh-out' : 'Platform clear', ...(D.onsite.length ? { delta: 'Live', deltaTag: 'ag-t-ok' } : {}) },
   ];
   const oweSup = (D.suppliers || []).reduce((t, p) => t + Math.max(0, d.owed(p)), 0);
   const minorKpis = [
+    { label: 'On the bridge', value: String(D.onsite.length), note: D.onsite.length ? 'Awaiting weigh-out' : 'Platform clear' },
     { label: 'We owe suppliers', value: M(oweSup), note: 'Soling, after payments' },
     { label: 'Payroll due', value: M(duePay), note: 'net of advances' },
     { label: 'Expense burn', value: M(burn), note: 'Sept to date' },
-    { label: 'Collected today', value: M(collected), note: 'Cash, UPI and account' },
   ];
   const ledgerKpis = [
     { label: 'Outstanding credit', value: M(outs), note: 'Across every account on terms' },
@@ -51,14 +75,18 @@ export default function Dashboard({ d, tab, setTab, go }) {
   const owing = D.customers.filter((c) => d.outstanding(c) > 0);
   const exposureNote = owing.length ? owing.length + ' of ' + D.customers.length + ' credit parties owe us' : 'No credit party owes anything';
   const byOutstanding = D.customers.slice().sort((a, b) => d.outstanding(b) - d.outstanding(a));
-  const topOwing = byOutstanding.filter((c) => d.outstanding(c) > 0).slice(0, 8);
 
+  // Materials sold on the chosen day (credit and walk-in), in units of 4 tons.
   const byMat = {};
-  done.forEach((o) => { byMat[o.matId] = (byMat[o.matId] || 0) + d.net(o); });
-  const maxM = Math.max(...Object.values(byMat), 1);
-  const matBars = Object.keys(byMat).sort((a, b) => byMat[b] - byMat[a]).slice(0, 6)
-    .map((k) => ({ key: k, label: d.mat(k).name, value: T(byMat[k]) + ' t', pct: Math.round((byMat[k] / maxM) * 100) }));
-  const maxC = Math.max(...D.customers.map((c) => d.outstanding(c)), 1);
+  todays.forEach((o) => {
+    const k = o.matId === 'M10' && o.matName ? 'M10:' + o.matName : o.matId;
+    const g = byMat[k] || (byMat[k] = { label: d.matLabel(o), tons: 0, loads: 0, value: 0 });
+    g.tons += d.net(o);
+    g.loads += 1;
+    g.value += d.billTotal(o);
+  });
+  const mats = Object.entries(byMat).sort((a, b) => b[1].tons - a[1].tons);
+  const maxM = Math.max(...mats.map(([, g]) => g.tons), 1);
 
   return (
     <section aria-label="Dashboard">
@@ -68,8 +96,12 @@ export default function Dashboard({ d, tab, setTab, go }) {
             {t}<i />
           </button>
         ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: '0 4px 10px', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--color-neutral-700)' }}>
-          <span className="ag-dot" />Live · {TODAY_LABEL}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, padding: '0 4px 10px', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--color-neutral-700)' }}>
+            {isToday && <span className="ag-dot" />}Showing
+            <input className="input" type="date" value={day} max={isoDate() > TODAY ? isoDate() : TODAY} onChange={(e) => setDay(e.target.value || TODAY)} style={{ width: 160, letterSpacing: 0, textTransform: 'none' }} aria-label="Dashboard date" />
+          </label>
+          {!isToday && <button type="button" className="btn btn-ghost" onClick={() => setDay(TODAY)}>Today</button>}
         </div>
       </div>
 
@@ -82,47 +114,48 @@ export default function Dashboard({ d, tab, setTab, go }) {
             {minorKpis.map((k) => <MinorTile key={k.label} {...k} />)}
           </div>
           <div className="ag-stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(330px,100%),1fr))', gap: 'var(--space-6)', marginTop: 'var(--space-6)' }}>
-            <Panel className="ag-card" style={{ minWidth: 0 }} title="Tonnage by material" sub="Net weighed across all closed tickets">
+            <Panel className="ag-card" style={{ minWidth: 0 }} title={'Materials sold ' + dayName} sub={U(tons) + ' units · ' + T(tons) + ' t across ' + todays.length + (todays.length === 1 ? ' load' : ' loads') + ' · 1 unit = 4 t'}>
               <div style={{ padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                {matBars.map((b) => (
-                  <div className="ag-listrow" key={b.key}>
+                {mats.map(([k, g]) => (
+                  <div className="ag-listrow" key={k}>
                     <div className="ag-bar-row">
-                      <span>{b.label}</span>
-                      <span className="ag-tabular" style={{ color: 'var(--color-neutral-700)' }}>{b.value}</span>
+                      <span>{g.label}</span>
+                      <span className="ag-tabular"><strong>{U(g.tons)} units</strong> <span style={{ color: 'var(--color-neutral-700)' }}>· {T(g.tons)} t</span></span>
                     </div>
                     <div className="ag-track ag-track-bar">
-                      <div className="ag-fill" style={{ background: 'var(--color-accent)', width: b.pct + '%' }} />
+                      <div className="ag-fill" style={{ background: 'var(--color-accent)', width: Math.round((g.tons / maxM) * 100) + '%' }} />
                     </div>
+                    <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', marginTop: 4 }}>{g.loads} load{g.loads === 1 ? '' : 's'} · billed {M(g.value)}</div>
                   </div>
                 ))}
+                {mats.length === 0 && <div style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>No material was sold {dayName}.</div>}
               </div>
             </Panel>
 
             <Panel
               className="ag-card"
               style={{ minWidth: 0 }}
-              title="Credit exposure"
-              sub={exposureNote}
-              action={<button type="button" className="btn btn-ghost" onClick={() => go('payments')}>Ledger</button>}
+              title={'Paid by credit parties ' + dayName}
+              sub={payers.length ? M(collected) + ' from ' + payers.length + ' part' + (payers.length === 1 ? 'y' : 'ies') : 'No credit party paid ' + dayName}
+              action={<button type="button" className="btn btn-ghost" onClick={() => go('customers')}>Credit parties</button>}
             >
               <div style={{ padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
-                {topOwing.map((c, i) => {
-                  const o = d.outstanding(c);
-                  const share = Math.round((o / Math.max(outs, 1)) * 100);
-                  const color = i < 3 ? 'var(--color-accent)' : 'var(--color-neutral-800)';
-                  return (
-                    <div className="ag-listrow" key={c.id}>
-                      <div className="ag-bar-row">
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>{c.name}<Tag cls={i < 3 ? 'ag-t-warn' : 'ag-t-mute'}>{share + '%'}</Tag></span>
-                        <span className="ag-tabular" style={{ color }}>{M(o)}</span>
-                      </div>
-                      <div className="ag-track ag-track-bar">
-                        <div className="ag-fill" style={{ background: color, width: Math.round((o / maxC) * 100) + '%' }} />
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', marginTop: 4 }}>{share}% of all outstanding · last receipt {d.lastReceipt(c)}</div>
+                {payers.map((g) => (
+                  <button type="button" className="ag-listrow" key={g.c.id || g.c.name} onClick={() => g.c.id && onOpenParty(g.c.id)} style={{ display: 'block', width: '100%', background: 'none', border: 0, padding: 0, textAlign: 'left', font: 'inherit', color: 'inherit', cursor: 'pointer' }}>
+                    <div className="ag-bar-row">
+                      <span style={{ fontWeight: 600 }}>{g.c.name}</span>
+                      <span className="ag-tabular" style={{ fontWeight: 700 }}>{M(g.total)}</span>
                     </div>
-                  );
-                })}
+                    <div className="ag-track ag-track-bar">
+                      <div className="ag-fill" style={{ background: 'var(--color-accent)', width: Math.round((g.total / maxPay) * 100) + '%' }} />
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', marginTop: 4 }}>
+                      {Object.entries(g.methods).map(([m, a]) => (METHOD_LABEL[m] || m) + ' ' + M(a)).join(' · ')}
+                      {g.toSup.length ? ' · ' + g.toSup.join(', ') : ''} · owes {M(d.outstanding(g.c))} now
+                    </div>
+                  </button>
+                ))}
+                {payers.length === 0 && <div style={{ fontSize: 13, color: 'var(--color-neutral-700)' }}>Pick another date above to see who paid that day.</div>}
               </div>
             </Panel>
           </div>

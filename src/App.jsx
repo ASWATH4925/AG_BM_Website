@@ -327,13 +327,13 @@ export default function App() {
       const b = rowBill(d, r);
       const tons = r.net / 1000;
       // The register amount is what was billed: when it differs from the rate card, keep it as a manual rate per ton.
-      const manualRate = r.amount > 0 && (b.mismatch || !b.card.rate) ? round2(r.amount / tons) : '';
+      const manualRate = +r.manualRate > 0 ? +r.manualRate : r.amount > 0 && (b.mismatch || !b.card.rate) ? round2(r.amount / tons) : '';
       const result = checkPay(r.pay, b.bill, { walkIn: !r.custId });
       const o = {
         id: 'O' + Date.now() + '-' + i, ticket: r.serial, serial: r.serial, date: r.date, time: r.time, custId: r.custId, walkIn: r.custId ? '' : r.walkIn,
         matId: r.matId, matName: r.matName, vehicle: r.vehicle, dir: 'OUT', tare: r.gross - r.net, gross: r.gross, manualRate,
         method: methodOf(r.pay), roundOff: result.roundOff, payRemarks: String(r.pay.remarks || '').trim(), regAmount: r.amount, batchId: r.batchId,
-        status: 'Completed', reason: '', remarks: '', by: SIGNED_IN_AS,
+        status: 'Completed', reason: '', remarks: r.remarks || '', by: SIGNED_IN_AS,
       };
       orders.push(o);
       payments.push(...toRecords(r.pay, o, SIGNED_IN_AS).map((p, j) => ({ ...p, id: p.id + '-' + i + '-' + j })));
@@ -353,7 +353,7 @@ export default function App() {
     const recs = ready.map((r, i) => ({
       id: 'U' + Date.now() + '-' + i, serial: r.serial, date: r.date, time: r.time, supplierId: r.supplierId, regName: r.name,
       // Soling trucks come in loaded: the register's Gross column is the empty truck, its Net column the loaded weight.
-      vehicle: r.vehicle, tare: r.gross, gross: r.net, manualRate: '', extra: '', batchId: r.batchId, remarks: '', by: SIGNED_IN_AS,
+      vehicle: r.vehicle, tare: r.gross, gross: r.net, manualRate: r.manualRate || '', extra: r.extra || '', batchId: r.batchId, remarks: r.remarks || '', by: SIGNED_IN_AS,
     }));
     const keys = new Set(ready.map((r) => r.key));
     set((st) => ({ db: { ...st.db, purchases: recs.concat(st.db.purchases), staging: st.db.staging.filter((r) => !keys.has(r.key)) } }));
@@ -377,6 +377,68 @@ export default function App() {
   const sup = s.mod === 'supplier' ? (s.db.suppliers || []).find((p) => p.id === s.supplierId) : null;
   const openSupplier = (id) => set({ mod: 'supplier', supplierId: id, supplierTab: 'Loads supplied', modal: null });
   const supplierOfParty = (custId) => (s.db.suppliers || []).find((p) => p.linkedCustId === custId);
+
+  // Manual load entered from a credit party's account; saving opens the payment dialog.
+  const openNewLoad = (custId) => {
+    const c = cfgOf('orders');
+    const f = {};
+    c.fields.forEach((x) => { f[x.k] = x.type === 'select' ? (x.options[0] ? x.options[0].v : '') : x.type === 'date' ? isoDate() : x.type === 'time' ? hhmm() : ''; });
+    f.custId = custId;
+    f.status = 'Completed';
+    set({ modal: { kind: 'form', cfgMod: 'orders', title: 'New load — ' + d.cust(custId).name, kicker: 'Manual entry', confirmLabel: 'Save · record payment' }, form: f, errors: {} });
+  };
+
+  // ---- editing imported rows before they are posted ----
+  // Sales keep the register's tare/gross; soling rows keep the register's Gross (empty truck) and Net (loaded truck).
+  const stagedTons = (r) => (r.kind === 'sale' ? r.net : r.net - r.gross) / 1000;
+  const openStagedEdit = (key) => {
+    const r = s.db.staging.find((x) => x.key === key);
+    const sale = r.kind === 'sale';
+    const t = stagedTons(r);
+    const rate = +r.manualRate > 0 ? +r.manualRate : sale && r.amount > 0 && t > 0 ? round2(r.amount / t) : '';
+    set({
+      modal: { kind: 'stagedEdit', key, sale, rate0: rate, title: 'Edit ' + r.serial, kicker: sale ? 'Imported sale' : 'Imported soling load', confirmLabel: 'Save changes' },
+      form: {
+        date: r.date, time: r.time || '', serial: r.serial, vehicle: r.vehicle, matId: r.matId || '', matName: r.matName || '',
+        empty: sale ? r.gross - r.net : r.gross, loaded: sale ? r.gross : r.net, rate, extra: r.extra || '', remarks: r.remarks || '',
+      },
+      errors: {},
+    });
+  };
+  const stagedDraft = () => {
+    const f = s.form;
+    const r = s.db.staging.find((x) => x.key === s.modal.key);
+    const empty = +f.empty || 0;
+    const loaded = +f.loaded || 0;
+    const base = { ...r, date: f.date, time: f.time, serial: String(f.serial || '').trim(), vehicle: String(f.vehicle || '').trim().toUpperCase(), remarks: String(f.remarks || '').trim() };
+    if (!s.modal.sale) return { ...base, gross: empty, net: loaded, manualRate: +f.rate > 0 ? +f.rate : '', extra: +f.extra > 0 ? +f.extra : '' };
+    const next = { ...base, matId: f.matId, matName: f.matId === OTHER_MATERIAL ? String(f.matName || '').trim() : '', gross: loaded, net: loaded - empty };
+    // A corrected weight, material, date or rate is billed as net tons × rate, not the register's printed amount.
+    const changed = next.net !== r.net || next.matId !== r.matId || next.date !== r.date || String(f.rate ?? '') !== String(s.modal.rate0 ?? '');
+    if (!changed) return next;
+    const card = d.rateFor(next.custId, next.matId, next.date).rate;
+    const rate = +f.rate > 0 ? +f.rate : 0;
+    return { ...next, amount: 0, manualRate: rate && Math.abs(rate - card) > 0.004 ? rate : '' };
+  };
+  const saveStagedEdit = () => {
+    const f = s.form;
+    const sale = s.modal.sale;
+    const errs = {};
+    if (!f.date) errs.date = 'Required.';
+    if (!String(f.vehicle || '').trim()) errs.vehicle = 'Required.';
+    if (!(+f.loaded > 0)) errs.loaded = 'Enter the loaded truck weight.';
+    else if (+f.loaded <= (+f.empty || 0)) errs.loaded = 'The loaded weight must be more than the empty truck.';
+    if (String(f.rate ?? '').trim() && !(+f.rate > 0)) errs.rate = 'Enter a rate greater than zero, or leave it blank.';
+    if (sale && f.matId === OTHER_MATERIAL && !String(f.matName || '').trim()) errs.matName = 'Type the material name for Other.';
+    const next = Object.keys(errs).length ? null : stagedDraft();
+    if (next && sale && !(rowBill(d, next).bill > 0)) errs.rate = 'No rate card covers this date — enter a rate per ton.';
+    if (Object.keys(errs).length) { set({ errors: errs }); return; }
+    const old = s.db.staging.find((x) => x.key === s.modal.key);
+    const billChanged = sale && Math.abs(rowBill(d, next).bill - rowBill(d, old).bill) > 0.005;
+    if (billChanged) next.pay = defaultPay(rowBill(d, next).bill, { walkIn: !next.custId, cashSerial: /^CA/i.test(next.serial) });
+    set((st) => ({ db: { ...st.db, staging: st.db.staging.map((r) => (r.key === next.key ? next : r)) }, modal: null }));
+    toast(next.serial + ' updated' + (billChanged ? ' — the bill is now ' + M(rowBill(d, next).bill) + '; check its payment.' : '.'));
+  };
 
   // ---- soling suppliers ----
   const openNewSoling = (supplierId) => {
@@ -652,7 +714,7 @@ export default function App() {
     NUMERIC_FIELDS.forEach((k) => { if (rec[k] !== undefined && rec[k] !== '') rec[k] = +rec[k]; });
     // A new manual order is saved on credit, then the payment dialog opens so staff record how it was paid.
     const newOrder = c.key === 'orders' && !m.id
-      ? { id: 'N' + Date.now(), ticket: 'WB-' + s.seq, dir: 'OUT', time: hhmm(), by: SIGNED_IN_AS, method: 'Credit', roundOff: 0, payRemarks: '', walkIn: '', ...rec }
+      ? { id: 'N' + Date.now(), ticket: 'WB-' + s.seq, dir: 'OUT', by: SIGNED_IN_AS, method: 'Credit', roundOff: 0, payRemarks: '', walkIn: '', ...rec, time: rec.time || hhmm() }
       : null;
     const editedOrder = c.key === 'orders' && m.id ? { ...s.db.orders.find((o) => o.id === m.id), ...rec } : null;
     set((st) => {
@@ -714,6 +776,21 @@ export default function App() {
         { k: 'ref', label: 'Reference / UTR / cheque no.' },
         { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
       ]
+        : m.kind === 'stagedEdit' ? [
+          { k: 'date', label: 'Date', type: 'date' },
+          { k: 'time', label: 'Time', type: 'time' },
+          { k: 'serial', label: 'Serial' },
+          { k: 'vehicle', label: 'Vehicle number' },
+          ...(m.sale ? [
+            { k: 'matId', label: 'Material', type: 'select', options: d.salesMaterials().map((x) => ({ v: x.id, l: x.name })) },
+            ...(s.form.matId === OTHER_MATERIAL ? [{ k: 'matName', label: 'Material name' }] : []),
+          ] : []),
+          { k: 'empty', label: m.sale ? 'Empty truck / tare (kg)' : 'Empty truck (kg) — register Gross', type: 'number' },
+          { k: 'loaded', label: m.sale ? 'Loaded truck / gross (kg)' : 'Loaded truck (kg) — register Net', type: 'number' },
+          { k: 'rate', label: 'Rate (₹ per ton)', type: 'number', hint: m.sale ? 'Blank = the party rate card for this date' : "Blank = the supplier's rate for this date" },
+          ...(m.sale ? [] : [{ k: 'extra', label: 'Extra charges (₹)', type: 'number', hint: 'Rent, unloading — added to what we owe' }]),
+          { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+        ]
         : m.kind === 'supPay' ? [
           { k: 'amount', label: 'Amount paid (₹)', type: 'number', hint: (() => { const o = d.owed(d.supplier(m.id)); return o < -0.5 ? 'Already paid ahead ' + M(-o) : 'We owe ' + M(Math.max(0, o)); })() },
           { k: 'method', label: 'Method', type: 'select', options: RECEIPT_METHODS },
@@ -750,9 +827,27 @@ export default function App() {
       form: s.form,
       errors: s.errors,
       setField: (k, v) => set((st) => ({ form: { ...st.form, [k]: v }, errors: { ...st.errors, [k]: null } })),
-      calcLines: formCfg && formCfg.calc ? formCfg.calc(s.form) : null,
+      calcLines: formCfg && formCfg.calc ? formCfg.calc(s.form)
+        : m.kind === 'stagedEdit' ? (() => {
+          const net = Math.max(0, (+s.form.loaded || 0) - (+s.form.empty || 0)) / 1000;
+          if (m.sale) {
+            const x = stagedDraft();
+            const b = rowBill(d, x);
+            return [
+              { label: 'Net weight', value: T(net) + ' t' },
+              { label: 'Rate', value: b.bill && net ? M(b.bill / net) + ' / t' : 'Not set' },
+              { label: x.amount > 0 ? 'Bill (register amount)' : 'Bill (net tons × rate)', value: M(b.bill) },
+            ];
+          }
+          const u = { supplierId: (s.db.staging.find((r) => r.key === m.key) || {}).supplierId, date: s.form.date, manualRate: s.form.rate, tare: +s.form.empty || 0, gross: +s.form.loaded || 0, extra: s.form.extra };
+          return [
+            { label: 'Net boulders', value: T(net) + ' t' },
+            { label: 'Rate (' + d.solRate(u).src + ')', value: M(d.solRate(u).rate) + ' / t' },
+            { label: 'We owe for this load', value: M(d.solValue(u)) },
+          ];
+        })() : null,
       onConfirm: {
-        delete: doDelete, void: doVoid, receipt: postReceipt, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
+        delete: doDelete, void: doVoid, receipt: postReceipt, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
         clearStaging: () => {
           const rows = s.db.staging;
           const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
@@ -796,7 +891,7 @@ export default function App() {
             className="ag-main"
             style={{ padding: 'var(--space-6) var(--space-8) 72px', flex: '1 1 auto', minWidth: 0, containerType: 'inline-size', background: 'linear-gradient(180deg, #F8F4F4A9, #B0B0B0)' }}
           >
-            {s.mod === 'dashboard' && <Dashboard d={d} tab={s.dashTab} setTab={(t) => set({ dashTab: t })} go={go} />}
+            {s.mod === 'dashboard' && <Dashboard d={d} tab={s.dashTab} setTab={(t) => set({ dashTab: t })} go={go} onOpenParty={openParty} />}
             {party && (
               <PartyDetail
                 d={d}
@@ -813,6 +908,7 @@ export default function App() {
                 onPayLoad={openTicketPay}
                 onDeleteLoad={(o) => askDelete(o, 'orders')}
                 onReceipt={() => openReceipt(party)}
+                onAddLoad={() => openNewLoad(party.id)}
                 onDeleteReceipt={(p) => askDelete(p, 'payments')}
                 onReport={(type, range) => openReport(party.id, type, range)}
               />
@@ -831,6 +927,7 @@ export default function App() {
                 onSupplier={chooseSupplierForRow}
                 onEditPay={editStagedPay}
                 onRemove={removeStaged}
+                onEdit={openStagedEdit}
                 onPostSales={postSales}
                 onPostSoling={postSoling}
                 onClear={clearStaged}

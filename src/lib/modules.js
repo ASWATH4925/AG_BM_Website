@@ -185,7 +185,8 @@ export function moduleConfig(mod, d) {
           ],
       rowAction: isVoid ? undefined : { label: 'Payment', kind: 'pay' },
       fields: [
-        { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'custId', label: 'Credit party', type: 'select', options: co(), req: 1 },
+        { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'time', label: 'Time', type: 'time' },
+        { k: 'custId', label: 'Credit party', type: 'select', options: co(), req: 1, span: 'span 2' },
         { k: 'matId', label: 'Material', type: 'select', options: so(), req: 1 },
         { k: 'matName', label: 'Material name', hint: 'Only for Other — type what was loaded' },
         { k: 'vehicle', label: 'Vehicle number', req: 1 },

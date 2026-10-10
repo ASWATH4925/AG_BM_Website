@@ -46,6 +46,7 @@ export default function SupplierDetail({
           </div>
           <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-secondary" onClick={() => onReport('statement', range)}>Generate report</button>
+            <button type="button" className="btn btn-secondary" onClick={onAddRate}>{nowRate.rate ? 'Change rate' : 'Set rate'}</button>
             <button type="button" className="btn btn-secondary" onClick={onAddLoad}>Add soling load</button>
             <button type="button" className="btn btn-primary" onClick={onPay}>Pay supplier</button>
           </div>
@@ -223,7 +224,8 @@ export default function SupplierDetail({
           <div style={{ padding: 'var(--space-6) var(--space-6) var(--space-4)' }}>
             <div className="ag-label" style={{ marginBottom: 6 }}>In force today · {today}</div>
             <div className="ag-big" style={{ fontSize: 24, letterSpacing: '-0.03em' }}>{nowRate.rate ? M(nowRate.rate) + ' / t' : 'Not set'}</div>
-            {nowRate.card && <div style={{ fontSize: 12, color: 'var(--color-neutral-600)', marginTop: 4 }}>since {nowRate.card.from}</div>}
+            <div style={{ fontSize: 12, color: 'var(--color-neutral-600)', marginTop: 4 }}>{nowRate.card ? 'since ' + nowRate.card.from : 'Set a rate so soling loads are valued'}</div>
+            <button type="button" className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }} onClick={onAddRate}>{nowRate.rate ? 'Change rate from a date' : 'Set rate'}</button>
           </div>
           <div style={{ overflowX: 'auto', borderTop: '1px solid rgba(32,30,29,.10)' }}>
             <table className="table" style={{ width: '100%', minWidth: 720 }}>

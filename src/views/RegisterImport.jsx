@@ -8,12 +8,13 @@ import { checkPay, payLabel } from '../lib/payments';
 
 const TH = { cursor: 'default' };
 
-// What a staged sale will be billed: the register amount when it has one, otherwise net tons × rate card.
+// What a staged sale will be billed: the register amount when it has one, otherwise net tons × rate
+// (a rate staff typed while editing the row, else the rate card).
 export function rowBill(d, row) {
   const tons = row.net / 1000;
   const card = d.rateFor(row.custId, row.matId, row.date);
   const cardAmount = tons * card.rate;
-  const bill = row.amount > 0 ? row.amount : cardAmount;
+  const bill = row.amount > 0 ? row.amount : tons * (+row.manualRate > 0 ? +row.manualRate : card.rate);
   return { bill, cardAmount, card, mismatch: row.amount > 0 && card.rate > 0 && Math.abs(cardAmount - row.amount) > 1 };
 }
 
@@ -33,7 +34,7 @@ export function solingStatus(row) {
   return { label: 'Ready', cls: 'ag-t-ok', ready: true };
 }
 
-export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditPay, onRemove, onPostSales, onPostSoling, onClear }) {
+export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditPay, onEdit, onRemove, onPostSales, onPostSoling, onClear }) {
   const input = useRef(null);
   const [drag, setDrag] = useState(false);
   const staging = d.db.staging || [];
@@ -145,7 +146,7 @@ export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditP
                       <td className="ag-tabular" style={{ textAlign: 'right' }}>
                         <div style={{ fontWeight: 600 }}>{b.bill ? M(b.bill) : '—'}</div>
                         {b.mismatch && <div style={{ fontSize: 11, color: '#8a5207' }}>Rate card {M(b.cardAmount)}</div>}
-                        {!r.amount && b.card.rate > 0 && <div style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}>at {M(b.card.rate)}/t</div>}
+                        {!r.amount && (+r.manualRate > 0 || b.card.rate > 0) && <div style={{ fontSize: 11, color: 'var(--color-neutral-600)' }}>at {M(+r.manualRate > 0 ? r.manualRate : b.card.rate)}/t{+r.manualRate > 0 ? ' (edited)' : ''}</div>}
                       </td>
                       <td style={{ whiteSpace: 'normal', minWidth: 150 }}>
                         {r.pay ? payLabel(r.pay, res ? res.credit : 0) : '—'}
@@ -154,6 +155,7 @@ export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditP
                       </td>
                       <td><Tag cls={st.cls}>{st.label}</Tag></td>
                       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button type="button" className="btn btn-ghost" onClick={() => onEdit(r.key)}>Edit</button>
                         {!r.dup && r.net > 0 && (r.custId || r.walkIn) && <button type="button" className="btn btn-ghost" onClick={() => onEditPay(r.key)}>Payment</button>}
                         <button type="button" className="btn btn-ghost" onClick={() => onRemove(r.key)}>Remove</button>
                       </td>
@@ -187,7 +189,7 @@ export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditP
               <tbody>
                 {soling.map((r) => {
                   const st = solingStatus(r);
-                  const u = { supplierId: r.supplierId, date: r.date, tare: r.gross, gross: r.net };
+                  const u = { supplierId: r.supplierId, date: r.date, tare: r.gross, gross: r.net, manualRate: r.manualRate, extra: r.extra };
                   const rate = r.supplierId ? d.solRate(u).rate : 0;
                   return (
                     <tr key={r.key}>
@@ -204,7 +206,10 @@ export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditP
                       <td className="ag-tabular" style={{ textAlign: 'right' }}>{rate ? M(rate) : '—'}</td>
                       <td className="ag-tabular" style={{ textAlign: 'right' }}>{rate ? M(d.solValue(u)) : r.supplierId ? 'No rate' : '—'}</td>
                       <td><Tag cls={st.cls}>{st.label}</Tag></td>
-                      <td style={{ textAlign: 'right' }}><button type="button" className="btn btn-ghost" onClick={() => onRemove(r.key)}>Remove</button></td>
+                      <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <button type="button" className="btn btn-ghost" onClick={() => onEdit(r.key)}>Edit</button>
+                        <button type="button" className="btn btn-ghost" onClick={() => onRemove(r.key)}>Remove</button>
+                      </td>
                     </tr>
                   );
                 })}
