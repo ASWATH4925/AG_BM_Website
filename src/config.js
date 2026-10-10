@@ -4,7 +4,9 @@ export const settings = {
   liveScale: true,
 };
 
-// The demo data is pinned to this business day.
-export const TODAY = '2026-10-08';
-export const TODAY_LABEL = '8 Oct 2026';
+import { isoDate } from './lib/format';
+
+// The business day: today's date on this device, taken when the app opens.
+export const TODAY = isoDate();
+export const TODAY_LABEL = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 export const IDLE_SCALE_KG = 14180;

@@ -164,7 +164,49 @@ export function creditorSummary(d, kind, from, to) {
   return { bills, by, value: bills.reduce((s, b) => s + d.crBillValue(b), 0), litres: bills.reduce((s, b) => s + (+b.litres || 0), 0) };
 }
 
-// Rough profit for a period: sales billed − soling bought − wages − fuel − spares − expenses + other income.
+// Electricity for the months in the period. Our cost = government + private bill − what the Thar plant used (not ours).
+export function ebSummary(d, from, to) {
+  const m0 = (from || '').slice(0, 7);
+  const m1 = (to || '').slice(0, 7);
+  const bills = (d.db.ebBills || []).filter((b) => (!m0 || b.month >= m0) && (!m1 || b.month <= m1)).sort((a, b) => a.month.localeCompare(b.month));
+  const readings = (d.db.ebReadings || []).filter((r) => inRange(r.date, from, to)).sort((a, b) => a.date.localeCompare(b.date));
+  const sum = (list, f) => list.reduce((s, x) => s + f(x), 0);
+  const bill = sum(bills, (b) => (+b.govt || 0) + (+b.private || 0));
+  const thar = sum(bills, (b) => +b.tharAmount || 0);
+  const pfs = readings.filter((r) => +r.pf > 0);
+  return {
+    bills, readings, bill, thar, cost: bill - thar,
+    units: sum(readings, (r) => +r.units || 0), tharUnits: sum(bills, (b) => +b.tharUnits || 0),
+    avgPf: pfs.length ? sum(pfs, (r) => +r.pf) / pfs.length : 0,
+  };
+}
+
+// How the period's sales were settled at the time of sale: cash, UPI (to the company or sent to others), bank, left on credit, round-off.
+export function salesByMode(d, from, to) {
+  const loads = d.db.orders.filter((o) => o.status !== 'Void' && inRange(o.date, from, to));
+  const t = { cash: 0, upi: 0, upiOthers: 0, bank: 0, credit: 0, roundOff: 0, total: 0 };
+  loads.forEach((o) => {
+    t.total += d.billTotal(o);
+    const recs = d.paymentsFor(o.id);
+    if (!recs.length && isPaidMethod(o.method)) {
+      const k = o.method === 'Cash' ? 'cash' : o.method === 'UPI' ? 'upi' : 'bank';
+      t[k] += d.billTotal(o);
+      return;
+    }
+    recs.forEach((p) => {
+      if (p.method === 'Cash') t.cash += p.amount;
+      else if (p.method === 'UPI') t[!p.toType || p.toType === 'company' ? 'upi' : 'upiOthers'] += p.amount;
+      else t.bank += p.amount;
+    });
+    t.credit += d.onCredit(o);
+    if (o.custId || recs.length) t.roundOff += +o.roundOff || 0;
+  });
+  // Money credit parties paid on account in the period (for loads taken earlier or now).
+  const receipts = (d.db.payments || []).filter((p) => !p.ticketId && p.custId && inRange(p.date, from, to)).reduce((s, p) => s + p.amount, 0);
+  return { ...t, loads: loads.length, receipts };
+}
+
+// Rough profit for a period: sales billed − soling bought − wages − fuel − spares − electricity − expenses + other income.
 export function profitSummary(d, from, to) {
   const s = salesSummary(d, from, to);
   const so = solingSummary(d, from, to);
@@ -172,8 +214,9 @@ export function profitSummary(d, from, to) {
   const w = wagesSummary(d, from, to);
   const fuel = creditorSummary(d, 'bunk', from, to).value;
   const spares = creditorSummary(d, 'vendor', from, to).value;
+  const eb = ebSummary(d, from, to).cost;
   return {
-    sales: s.value, soling: so.value, wages: w.earned, fuel, spares, expenses: e.spentTotal, income: e.incomeTotal,
-    net: s.value - so.value - w.earned - fuel - spares - e.spentTotal + e.incomeTotal,
+    sales: s.value, soling: so.value, wages: w.earned, fuel, spares, eb, expenses: e.spentTotal, income: e.incomeTotal,
+    net: s.value - so.value - w.earned - fuel - spares - eb - e.spentTotal + e.incomeTotal,
   };
 }

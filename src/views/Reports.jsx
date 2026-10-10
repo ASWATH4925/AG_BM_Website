@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Panel from '../components/Panel';
 import StatTile from '../components/StatTile';
 import { TODAY } from '../config';
-import { profitSummary, salesSummary } from '../lib/books';
+import { profitSummary, salesByMode, salesSummary } from '../lib/books';
 import { buildReport, exportAll, reportExcel, reportPdf, REPORTS } from '../lib/exports';
 import { M, pad2, T, U } from '../lib/format';
 
@@ -25,13 +25,14 @@ function presets() {
   ];
 }
 
-export default function Reports({ d, onToast }) {
+export default function Reports({ d, onToast, onStartFresh }) {
   const ranges = presets();
   const [from, setFrom] = useState(ranges[1].from);
   const [to, setTo] = useState(ranges[1].to);
   const [busy, setBusy] = useState('');
   const p = profitSummary(d, from, to);
   const s = salesSummary(d, from, to);
+  const pm = salesByMode(d, from, to);
 
   const run = async (kind, as) => {
     setBusy(kind + as);
@@ -69,8 +70,8 @@ export default function Reports({ d, onToast }) {
       <div className="ag-stagger ag-quad" style={{ marginTop: 'var(--space-6)' }}>
         <StatTile label="Sales billed" value={M(p.sales)} note={U(s.tons) + ' units · ' + T(s.tons) + ' t · ' + s.loads.length + ' loads'} />
         <StatTile label="Soling bought" value={M(p.soling)} note="Boulders from suppliers" />
-        <StatTile label="Wages, fuel & expenses" value={M(p.wages + p.fuel + p.spares + p.expenses)} note={'Wages ' + M(p.wages) + ' · fuel ' + M(p.fuel) + ' · spares ' + M(p.spares) + ' · other ' + M(p.expenses)} />
-        <StatTile label={p.net >= 0 ? 'Profit (rough)' : 'Loss (rough)'} value={M(Math.abs(p.net))} note="Sales − soling − wages − fuel − spares − expenses + income" />
+        <StatTile label="Running costs" value={M(p.wages + p.fuel + p.spares + p.eb + p.expenses)} note={'Wages ' + M(p.wages) + ' · fuel ' + M(p.fuel) + ' · spares ' + M(p.spares) + ' · EB ' + M(p.eb) + ' · other ' + M(p.expenses)} />
+        <StatTile label={p.net >= 0 ? 'Profit (rough)' : 'Loss (rough)'} value={M(Math.abs(p.net))} note="Sales − soling − running costs + other income" />
       </div>
 
       <Panel className="ag-rise" style={{ marginTop: 'var(--space-6)' }} title="Download reports" sub={'For ' + (from || 'the beginning') + ' to ' + (to || 'now') + ' · PDF to print or send, Excel to work with the numbers'}>
@@ -85,6 +86,21 @@ export default function Reports({ d, onToast }) {
               </div>
             </div>
           ))}
+        </div>
+      </Panel>
+
+      <Panel className="ag-rise" style={{ marginTop: 'var(--space-6)' }} title="Sales by payment mode" sub={'How the ' + M(pm.total) + ' of sales in this period were paid'}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(min(170px,100%),1fr))', gap: 'var(--space-3)', padding: 'var(--space-6)' }}>
+          {[['Cash', pm.cash], ['UPI', pm.upi], ['UPI sent to others', pm.upiOthers], ['Bank / account', pm.bank], ['Credit', pm.credit], ['Round-off', pm.roundOff]].map(([l, v]) => (
+            <div key={l} className="ag-stat" style={{ padding: '12px 14px' }}>
+              <div className="ag-label">{l}</div>
+              <div className="ag-big" style={{ fontSize: 20, letterSpacing: '-0.03em', marginTop: 6 }}>{M(v)}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--color-neutral-600)', marginTop: 3 }}>{pm.total ? Math.round((v / pm.total) * 100) + '% of sales' : '—'}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: '0 var(--space-6) var(--space-6)', fontSize: 12.5, color: 'var(--color-neutral-700)' }}>
+          Credit is what was left unpaid at the time of sale. Credit parties also paid <strong>{M(pm.receipts)}</strong> on account in this period.
         </div>
       </Panel>
 
@@ -130,6 +146,10 @@ export default function Reports({ d, onToast }) {
       >
         <div style={{ padding: 'var(--space-3) var(--space-6) var(--space-6)', fontSize: 12.5, color: 'var(--color-neutral-700)' }}>
           {d.db.orders.length} loads · {(d.db.payments || []).length} payments · {(d.db.purchases || []).length} soling loads · {(d.db.expenses || []).length} expenses · {d.db.customers.length} credit parties
+          <div style={{ marginTop: 'var(--space-4)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', alignItems: 'center' }}>
+            <button type="button" className="btn btn-secondary" onClick={onStartFresh}>Start fresh — remove sample data</button>
+            <span>Clears loads, payments, soling loads, workers, fuel, spares, expenses and EB. Keeps credit parties, soling suppliers, materials and rates.</span>
+          </div>
         </div>
       </Panel>
     </section>

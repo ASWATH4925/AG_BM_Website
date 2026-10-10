@@ -1,5 +1,5 @@
 import { TONS_PER_UNIT } from './format';
-import { creditorSummary, dayBook, expenseHead, expenseSummary, modeName, profitSummary, salesSummary, solingSummary } from './books';
+import { creditorSummary, dayBook, ebSummary, salesByMode, expenseHead, expenseSummary, modeName, profitSummary, salesSummary, solingSummary } from './books';
 
 // Period reports, described once and written out as PDF or Excel.
 // Column formats: 'm' money, 't' tons, 'u' units, '' text. Excel keeps the numbers; the PDF formats them.
@@ -7,13 +7,15 @@ import { creditorSummary, dayBook, expenseHead, expenseSummary, modeName, profit
 export const REPORTS = [
   { v: 'daybook', l: 'Day book', sub: 'Every rupee in and out — cash and bank — with opening and closing balances' },
   { v: 'materials', l: 'Sales by material', sub: 'Units, tons, loads and value for each material' },
+  { v: 'paymodes', l: 'Sales by payment mode', sub: 'How sales were paid — cash, UPI, bank, left on credit — plus receipts on account' },
   { v: 'parties', l: 'Sales by party', sub: 'Loads, value, paid and on credit for each credit party and walk-ins' },
   { v: 'collections', l: 'Collections', sub: 'Every payment received, and money parties sent straight to others' },
   { v: 'soling', l: 'Soling purchases', sub: 'Loads, tons, value and payments for each soling supplier' },
   { v: 'fuel', l: 'Fuel bunks', sub: 'Fuel taken on credit — litres and amount by bunk, every fill, payments and what we owe' },
   { v: 'spares', l: 'Spares & purchases', sub: 'Purchase bills by company, payments and what we owe' },
+  { v: 'eb', l: 'Electricity (EB)', sub: 'Daily units and PF, month-end bills, Thar plant share and our cost' },
   { v: 'expenses', l: 'Expenses', sub: 'Every expense and other income, with totals by head' },
-  { v: 'profit', l: 'Profit summary', sub: 'Sales − soling − wages − fuel − spares − expenses + other income' },
+  { v: 'profit', l: 'Profit summary', sub: 'Sales − soling − wages − fuel − spares − electricity − expenses + income' },
 ];
 
 const r2 = (n) => Math.round((+n || 0) * 100) / 100;
@@ -130,6 +132,48 @@ export function buildReport(kind, d, from, to) {
     };
   }
 
+  if (kind === 'paymodes') {
+    const t = salesByMode(d, from, to);
+    const row = (l, v) => [l, v, t.total ? r2((v / t.total) * 100) : 0];
+    return {
+      title: 'Sales by payment mode', file: file('sales-by-payment-mode'), lines: lines.concat([t.loads + ' loads in the period']),
+      sections: [
+        {
+          heading: 'How the sales were paid', fmt: ['', 'm', ''],
+          head: ['Paid by', 'Amount (Rs.)', '% of sales'],
+          body: [row('Cash', t.cash), row('UPI to the company', t.upi), row('UPI sent to suppliers / bunks / others', t.upiOthers), row('Bank / account', t.bank), row('Left on credit', t.credit), row('Round-off', t.roundOff)],
+          foot: ['Total sales billed', t.total, 100],
+        },
+        {
+          heading: 'Also in the period', fmt: ['', 'm'],
+          head: ['', 'Amount (Rs.)'],
+          body: [['Received from credit parties on account', t.receipts]],
+        },
+      ],
+    };
+  }
+
+  if (kind === 'eb') {
+    const e = ebSummary(d, from, to);
+    return {
+      title: 'Electricity (EB)', file: file('electricity'), lines: lines.concat(['Units ' + r2(e.units) + ' kWh · average PF ' + (e.avgPf ? e.avgPf.toFixed(3) : '-') + ' · our cost ' + rs(e.cost)]),
+      sections: [
+        {
+          heading: 'Month-end bills', fmt: ['', 'm', 'm', 'm', '', 'm', 'm'],
+          head: ['Month', 'Government (TNEB)', 'Private', 'Bill total', 'Thar plant units', 'Thar plant amount', 'Our cost'],
+          body: e.bills.map((b) => [b.month, +b.govt || 0, +b.private || 0, (+b.govt || 0) + (+b.private || 0), +b.tharUnits || 0, +b.tharAmount || 0, (+b.govt || 0) + (+b.private || 0) - (+b.tharAmount || 0)]),
+          foot: ['Total', e.bills.reduce((s, b) => s + (+b.govt || 0), 0), e.bills.reduce((s, b) => s + (+b.private || 0), 0), e.bill, e.tharUnits, e.thar, e.cost],
+        },
+        {
+          heading: 'Daily readings', fmt: ['', '', '', ''],
+          head: ['Date', 'Units (kWh)', 'PF', 'Remarks'],
+          body: e.readings.map((r) => [r.date, +r.units || 0, +r.pf ? (+r.pf).toFixed(3) : '', r.remarks || '']),
+          foot: ['Total', r2(e.units), e.avgPf ? 'avg ' + e.avgPf.toFixed(3) : '', ''],
+        },
+      ],
+    };
+  }
+
   if (kind === 'fuel' || kind === 'spares') {
     const bunk = kind === 'fuel';
     const s = creditorSummary(d, bunk ? 'bunk' : 'vendor', from, to);
@@ -185,7 +229,7 @@ export function buildReport(kind, d, from, to) {
     sections: [{
       fmt: ['', 'm'],
       head: ['', 'Amount (Rs.)'],
-      body: [['Sales billed', p.sales], ['Less soling bought', -p.soling], ['Less wages (salaries paid)', -p.wages], ['Less fuel (bunk bills)', -p.fuel], ['Less spares & purchases', -p.spares], ['Less expenses', -p.expenses], ['Add other income', p.income]],
+      body: [['Sales billed', p.sales], ['Less soling bought', -p.soling], ['Less wages (salaries paid)', -p.wages], ['Less fuel (bunk bills)', -p.fuel], ['Less spares & purchases', -p.spares], ['Less electricity (excl. Thar plant)', -p.eb], ['Less expenses', -p.expenses], ['Add other income', p.income]],
       foot: [p.net >= 0 ? 'Profit' : 'Loss', p.net],
     }],
   };

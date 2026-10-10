@@ -67,12 +67,12 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty }) {
     { label: 'On the bridge', value: String(D.onsite.length), note: D.onsite.length ? 'Awaiting weigh-out' : 'Platform clear' },
     { label: 'We owe', value: M(oweSup + oweCr), note: 'Soling ' + M(oweSup) + ' · fuel & spares ' + M(oweCr) },
     { label: 'Salary due', value: M(duePay), note: 'Week ending ' + payWeek.slice(5) + ', after advances' },
-    { label: 'Expense burn', value: M(burn), note: 'Sept to date' },
+    { label: 'Expense burn', value: M(burn), note: 'All expenses recorded' },
   ];
   const ledgerKpis = [
     { label: 'Outstanding credit', value: M(outs), note: 'Across every account on terms' },
     { label: 'Salary due', value: M(duePay), note: 'Unpaid for the week ending ' + payWeek },
-    { label: 'Expense burn', value: M(burn), note: 'September to date, net' },
+    { label: 'Expense burn', value: M(burn), note: 'All expenses recorded, net' },
     { label: 'We owe', value: M(oweSup + oweCr), note: 'Soling ' + M(oweSup) + ' · fuel & spares ' + M(oweCr) },
   ];
 

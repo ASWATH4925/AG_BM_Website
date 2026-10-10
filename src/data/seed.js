@@ -192,7 +192,7 @@ export function upgradeDb(saved) {
   if (!db.solRates) db.solRates = JSON.parse(JSON.stringify(solRates));
   db.purchases = db.purchases.map(normalSoling);
   // Saves from before daily wages held demo monthly salaries; start them on the daily-wage sample instead.
-  if (!(db.employees || []).some((e) => 'wage' in e)) Object.assign(db, peopleSeed());
+  if ((db.employees || []).length && !db.employees.some((e) => 'wage' in e)) Object.assign(db, peopleSeed());
   if (!db.creditors) Object.assign(db, JSON.parse(JSON.stringify({ creditors, crBills, crPayments })));
   if (!db.settings) db.settings = { cashStart: 0, bankStart: 0, startDate: '' };
   db.expenses = (db.expenses || []).map((x) => ({ time: '', headOther: '', ...x, mode: x.mode === 'Bank Transfer' ? 'Account' : x.mode, head: x.head === 'Electricity' ? 'Electricity (EB)' : x.head }));

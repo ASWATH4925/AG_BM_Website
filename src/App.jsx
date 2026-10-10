@@ -19,6 +19,7 @@ import Attendance from './views/Attendance';
 import CreditorDetail from './views/CreditorDetail';
 import Creditors from './views/Creditors';
 import Dashboard from './views/Dashboard';
+import Electricity from './views/Electricity';
 import DayBook from './views/DayBook';
 import Reports from './views/Reports';
 import Salary from './views/Salary';
@@ -35,7 +36,7 @@ const FILTERS_CLEAR = { q: '', status: 'All', from: '', to: '', sortK: null };
 const RECEIPT_METHODS = ['Cash', 'UPI', 'Account', 'Cheque'].map((x) => ({ v: x, l: METHOD_LABEL[x] || x }));
 // Modules drawn by their own view instead of the generic list (their config still drives add/edit forms).
 const CUSTOM_LISTS = ['customers', 'suppliers', 'voids', 'bunks', 'vendors'];
-const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports', 'attendance', 'payroll', 'creditor'];
+const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports', 'attendance', 'payroll', 'creditor', 'eb'];
 const SIGNED_IN_AS = 'A. Gopalakrishnan';
 
 const isWide = () => window.innerWidth >= 900;
@@ -543,6 +544,49 @@ export default function App() {
     toast('Salary statement downloaded.');
   };
 
+  // ---- electricity: one reading per day, one month-end entry per month ----
+  const saveEbReading = (rec) => {
+    set((st) => {
+      const list = st.db.ebReadings || [];
+      const was = list.find((r) => r.date === rec.date);
+      const next = was ? list.map((r) => (r.date === rec.date ? { ...r, ...rec, by: SIGNED_IN_AS } : r)) : list.concat([{ id: 'EB' + Date.now(), ...rec, by: SIGNED_IN_AS }]);
+      return { db: { ...st.db, ebReadings: next } };
+    });
+    toast('EB reading for ' + rec.date + ' saved — ' + rec.units + ' kWh' + (rec.pf ? ', PF ' + rec.pf : '') + '.');
+  };
+  const saveEbBill = (rec) => {
+    set((st) => {
+      const list = st.db.ebBills || [];
+      const was = list.find((b) => b.month === rec.month);
+      const next = was ? list.map((b) => (b.month === rec.month ? { ...b, ...rec, by: SIGNED_IN_AS } : b)) : list.concat([{ id: 'EBB' + Date.now(), ...rec, by: SIGNED_IN_AS }]);
+      return { db: { ...st.db, ebBills: next } };
+    });
+    toast('Month-end electricity for ' + rec.month + ' saved.');
+  };
+
+  // ---- start fresh: remove sample data before real use ----
+  const openStartFresh = () => set({
+    modal: {
+      kind: 'startFresh', title: 'Start fresh for real use?', kicker: 'Remove sample data', confirmLabel: 'Remove sample data',
+      message: 'Removes every load, payment, imported row, soling load, soling payment and pass, soling rate, worker, attendance, advance, salary, fuel bunk, spares company, expense, EB entry and voided entry. Keeps credit parties, soling suppliers, materials and party / standard rates. Download a full backup first if you are unsure. This cannot be undone.',
+    },
+    form: { confirm: '' }, errors: {},
+  });
+  const startFresh = () => {
+    if (String(s.form.confirm || '').trim().toUpperCase() !== 'START') { set({ errors: { confirm: 'Type START to confirm.' } }); return; }
+    set((st) => ({
+      db: {
+        ...st.db,
+        orders: [], payments: [], staging: [], imports: [], purchases: [], supPayments: [], solPasses: [], solRates: [], voided: [], onsite: [],
+        employees: [], attendance: [], advances: [], payroll: [], expenses: [], creditors: [], crBills: [], crPayments: [], ebReadings: [], ebBills: [],
+        settings: { cashStart: 0, bankStart: 0, startDate: '' },
+        customers: st.db.customers.map((c) => ({ ...c, received: 0, last: '—' })),
+      },
+      modal: null,
+    }));
+    toast('Sample data removed. Add your workers, bunk, spares companies and soling rates, then start entering real days.');
+  };
+
   // ---- day book ----
   const openExpense = () => {
     const c = cfgOf('expenses');
@@ -691,6 +735,8 @@ export default function App() {
         records: { suppliers: [row], purchases: loads, supPayments: (D.supPayments || []).filter((p) => p.supplierId === row.id), solRates: (D.solRates || []).filter((r) => r.supplierId === row.id) },
       };
     }
+    if (key === 'ebReadings') return { kind: 'EB reading', label: row.date + ' · ' + row.units + ' kWh' + (row.pf ? ' · PF ' + row.pf : ''), amount: null, records: { ebReadings: [row] } };
+    if (key === 'ebBills') return { kind: 'Electricity bill', label: row.month + ' · govt ' + M(row.govt) + ' · private ' + M(row.private) + (row.tharAmount ? ' · Thar ' + M(row.tharAmount) : ''), amount: (+row.govt || 0) + (+row.private || 0), records: { ebBills: [row] } };
     if (key === 'solPasses') return { kind: 'Pass amount', label: d.supplier(row.supplierId).name + ' · ' + row.date + ((row.loadIds || []).length ? ' · ' + row.loadIds.length + ' load(s)' : ''), amount: +row.amount || 0, records: { solPasses: [row] } };
     if (key === 'creditors') {
       return {
@@ -984,6 +1030,7 @@ export default function App() {
           { k: 'cashStart', label: 'Cash in hand (₹)', type: 'number' },
           { k: 'bankStart', label: 'Bank & UPI balance (₹)', type: 'number' },
         ]
+        : m.kind === 'startFresh' ? [{ k: 'confirm', label: 'Type START to confirm', span: 'span 2', placeholder: 'START' }]
         : m.kind === 'solPass' ? [
           { k: 'amount', label: 'Pass amount (₹)', type: 'number' },
           { k: 'date', label: 'Date', type: 'date' },
@@ -1070,7 +1117,7 @@ export default function App() {
           ];
         })() : null,
       onConfirm: {
-        delete: doDelete, void: doVoid, receipt: postReceipt, solPass: savePass, crPay: postCrPay, salary: saveSalary, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
+        delete: doDelete, void: doVoid, receipt: postReceipt, startFresh, solPass: savePass, crPay: postCrPay, salary: saveSalary, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
         clearStaging: () => {
           const rows = s.db.staging;
           const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
@@ -1198,7 +1245,16 @@ export default function App() {
                 onOpenSupplier={openSupplier}
               />
             )}
-            {s.mod === 'reports' && <Reports d={d} onToast={toast} />}
+            {s.mod === 'reports' && <Reports d={d} onToast={toast} onStartFresh={openStartFresh} />}
+            {s.mod === 'eb' && (
+              <Electricity
+                d={d}
+                onSaveReading={saveEbReading}
+                onDeleteReading={(r) => askDelete(r, 'ebReadings')}
+                onSaveBill={saveEbBill}
+                onDeleteBill={(b) => askDelete(b, 'ebBills')}
+              />
+            )}
             {(s.mod === 'bunks' || s.mod === 'vendors') && (
               <Creditors
                 key={s.mod}

@@ -11,6 +11,7 @@ export const MODS = {
   import: { label: 'Register Import', group: 'Operations', title: 'Register import', sub: 'Load the weighbridge register, check each row and record how it was paid.' },
   orders: { label: 'Orders', group: 'Operations', title: 'Orders & transactions', sub: 'Every sale, priced at net tons × the rate per ton in force on its date, with how it was paid.' },
   purchases: { label: 'Soling Loads', group: 'Operations', title: 'Soling loads', sub: 'Boulders bought from soling suppliers — net tons × the supplier rate on that date, plus any extra charges.' },
+  eb: { label: 'Electricity (EB)', group: 'Operations', title: 'Electricity (EB)', sub: 'Units and power factor every day; at month end the government and private bill, and the Thar plant share (not our cost).' },
   voids: { label: 'Voided Entries', group: 'Operations', title: 'Voided entries', sub: 'Everything deleted or cancelled — who did it, when and why. Any entry can be restored.' },
   customers: { label: 'Credit Parties', group: 'Masters', title: 'Credit parties', sub: 'Everyone who takes material on credit — owner, address, contact and their own ton rates.' },
   suppliers: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling suppliers', sub: 'Boulder suppliers we buy from and owe money to. Kept apart from credit parties.' },
