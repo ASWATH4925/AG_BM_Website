@@ -1,5 +1,6 @@
 import { BOOK_MODES, EXPENSE_HEADS, expenseHead, INCOME_HEADS, modeName } from './books';
 import { OTHER_MATERIAL } from './domain';
+import { createPeople } from './people';
 import { M, N, T } from './format';
 
 export const NAV_GROUPS = ['Operations', 'Masters', 'Finance', 'People'];
@@ -22,10 +23,10 @@ export const MODS = {
   reports: { label: 'Reports', group: 'Finance', title: 'Reports', sub: 'Sales, collections, soling, expenses and profit for any period — as PDF or Excel — and a full backup.' },
   payments: { label: 'Payments & Credit', group: 'Finance', title: 'Payments & credit', sub: 'Receipts, outstanding balances and ageing by account.' },
   expenses: { label: 'Expenses', group: 'Finance', title: 'Expenses', sub: 'Credit and debit entries against the yard.' },
-  employees: { label: 'Employees', group: 'People', title: 'Employees', sub: 'Roster, roles and monthly salary.' },
-  attendance: { label: 'Attendance', group: 'People', title: 'Attendance', sub: 'Shift marking and overtime hours feeding payroll.' },
-  advances: { label: 'Advances', group: 'People', title: 'Employee advances', sub: 'Amounts paid ahead of salary and their recovery.' },
-  payroll: { label: 'Payroll', group: 'People', title: 'Salary & payroll', sub: 'Attendance-based salary with advance deduction.' },
+  employees: { label: 'Employees', group: 'People', title: 'Workers', sub: 'Everyone on daily wages — name, work, phone and daily pay.' },
+  attendance: { label: 'Attendance', group: 'People', title: 'Attendance', sub: 'Mark every worker for the day — present, half day or absent — with remarks. Past days can be edited.' },
+  advances: { label: 'Advances', group: 'People', title: 'Advances', sub: 'Money given to workers ahead of Saturday — taken back from their salary.' },
+  payroll: { label: 'Weekly Salary', group: 'People', title: 'Weekly salary', sub: 'Saturday pay: days worked × daily wage, less this week’s advance and any older advance you recover.' },
 };
 
 const opts = (a) => a.map((x) => ({ v: x, l: x }));
@@ -46,7 +47,6 @@ export function moduleConfig(mod, d) {
   const D = d.db;
   const co = () => D.customers.map((c) => ({ v: c.id, l: c.name }));
   const so = () => D.materials.filter((x) => x.kind !== 'purchase').map((x) => ({ v: x.id, l: x.name }));
-  const eo = () => D.employees.map((e) => ({ v: e.id, l: e.name }));
   const linkedSupplier = (c) => (D.suppliers || []).find((p) => p.linkedCustId === c.id);
 
   if (mod === 'customers') return {
@@ -273,75 +273,49 @@ export function moduleConfig(mod, d) {
     },
   };
 
-  if (mod === 'employees') return {
-    key: 'employees', add: 'New employee', statusKey: 'status', statuses: ['All', 'Active', 'On leave'],
-    cols: [
-      { k: 'code', label: 'Code' }, { k: 'name', label: 'Name' }, { k: 'role', label: 'Role' }, { k: 'phone', label: 'Phone' }, { k: 'joined', label: 'Joined' },
-      { k: 'salary', label: 'Monthly salary', t: 'money' }, { k: '_ab', label: 'Advance balance', t: 'money', get: (e) => d.advanceBalance(e.id, false) },
-      { k: 'status', label: 'Status', t: 'tag' },
-    ],
-    fields: [
-      { k: 'name', label: 'Name', req: 1, span: 'span 2' }, { k: 'role', label: 'Role', req: 1 }, { k: 'phone', label: 'Phone', req: 1 },
-      { k: 'joined', label: 'Joined on', type: 'date' }, { k: 'salary', label: 'Monthly salary', type: 'number', req: 1 },
-      { k: 'status', label: 'Status', type: 'select', options: opts(['Active', 'On leave']) },
-    ],
-    foot: (rows) => 'Monthly wage bill: ' + M(rows.reduce((s, e) => s + e.salary, 0)),
-  };
+  if (mod === 'employees') {
+    const P = createPeople(D);
+    return {
+      key: 'employees', add: 'New worker', statusKey: 'status', statuses: ['All', 'Active', 'Left'],
+      cols: [
+        { k: 'code', label: 'Code' }, { k: 'name', label: 'Name' }, { k: 'role', label: 'Work' }, { k: 'phone', label: 'Phone' },
+        { k: 'wage', label: 'Daily wage', t: 'money' }, { k: '_ad', label: 'Advance due', t: 'money', get: (e) => Math.max(0, P.advanceDue(e.id)) },
+        { k: 'status', label: 'Status', t: 'tag' }, { k: 'remarks', label: 'Remarks' },
+      ],
+      fields: [
+        { k: 'name', label: 'Name', req: 1, span: 'span 2' }, { k: 'role', label: 'Work / role' }, { k: 'phone', label: 'Phone' },
+        { k: 'wage', label: 'Daily wage (₹)', type: 'number', req: 1, hint: 'A changed wage applies to days marked after saving' },
+        { k: 'status', label: 'Status', type: 'select', options: opts(['Active', 'Left']) },
+        { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+      ],
+      validate: (f, id) => ({
+        ...uniqueName(D.employees, f, id, 'A worker'),
+        ...(String(f.wage ?? '').trim() && !(+f.wage > 0) ? { wage: 'Enter the daily wage.' } : {}),
+      }),
+      foot: (rows) => 'Daily wage bill (active): ' + M(rows.filter((e) => e.status !== 'Left').reduce((s, e) => s + (+e.wage || 0), 0)),
+    };
+  }
 
-  if (mod === 'attendance') return {
-    key: 'attendance', add: 'Mark attendance', dateKey: 'date', statusKey: 'status', statuses: ['All', 'Present', 'Absent', 'Half day', 'Leave'],
-    cols: [
-      { k: 'date', label: 'Date' }, { k: '_e', label: 'Employee', get: (a) => d.emp(a.empId).name }, { k: 'shift', label: 'Shift' }, { k: 'in', label: 'In' },
-      { k: 'out', label: 'Out' }, { k: '_h', label: 'Hours', t: 'num2', get: (a) => d.hours(a) }, { k: 'ot', label: 'OT hrs', t: 'num' }, { k: 'status', label: 'Status', t: 'tag' },
-    ],
-    fields: [
-      { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'empId', label: 'Employee', type: 'select', options: eo(), req: 1 },
-      { k: 'shift', label: 'Shift', type: 'select', options: opts(['Day A', 'Day B', 'General', 'Night']) },
-      { k: 'in', label: 'In time', placeholder: '07:50' }, { k: 'out', label: 'Out time', placeholder: '18:00' },
-      { k: 'ot', label: 'Overtime hours', type: 'number' }, { k: 'status', label: 'Status', type: 'select', options: opts(['Present', 'Absent', 'Half day', 'Leave']) },
-    ],
-    foot: (rows) => 'Man-hours ' + T(rows.reduce((s, a) => s + d.hours(a), 0)) + ' · OT ' + N(rows.reduce((s, a) => s + (+a.ot || 0), 0)) + ' hrs',
-  };
-
-  if (mod === 'advances') return {
-    key: 'advances', add: 'New advance', dateKey: 'date', statusKey: 'status', statuses: ['All', 'Open', 'Recovering', 'Cleared'],
-    cols: [
-      { k: 'date', label: 'Date' }, { k: '_e', label: 'Employee', get: (a) => d.emp(a.empId).name }, { k: 'amount', label: 'Advance', t: 'money' },
-      { k: 'reason', label: 'Reason' }, { k: 'recovered', label: 'Recovered', t: 'money' }, { k: '_b', label: 'Balance', t: 'money', get: (a) => a.amount - a.recovered },
-      { k: 'status', label: 'Status', t: 'tag' },
-    ],
-    fields: [
-      { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'empId', label: 'Employee', type: 'select', options: eo(), req: 1 },
-      { k: 'amount', label: 'Advance amount', type: 'number', req: 1 }, { k: 'reason', label: 'Reason', span: 'span 2' },
-      { k: 'recovered', label: 'Recovered so far', type: 'number' }, { k: 'status', label: 'Status', type: 'select', options: opts(['Open', 'Recovering', 'Cleared']) },
-    ],
-    foot: (rows) => 'Outstanding advances: ' + M(rows.reduce((s, a) => s + (a.amount - a.recovered), 0)),
-  };
-
-  if (mod === 'payroll') return {
-    key: 'payroll', add: 'Run payroll line', statusKey: 'status', statuses: ['All', 'Paid', 'Pending'],
-    cols: [
-      { k: '_e', label: 'Employee', get: (p) => d.emp(p.empId).name }, { k: 'month', label: 'Cycle' }, { k: 'days', label: 'Days present', t: 'num' },
-      { k: 'ot', label: 'OT hrs', t: 'num' }, { k: '_b', label: 'Earned base', t: 'money', get: (p) => d.payLine(p).base },
-      { k: '_o', label: 'OT pay', t: 'money', get: (p) => d.payLine(p).ot }, { k: '_d', label: 'Advance deducted', t: 'money', get: (p) => d.payLine(p).ded },
-      { k: '_n', label: 'Net payable', t: 'money', get: (p) => d.payLine(p).net }, { k: 'status', label: 'Status', t: 'tag' },
-    ],
-    fields: [
-      { k: 'empId', label: 'Employee', type: 'select', options: eo(), req: 1 }, { k: 'month', label: 'Cycle (YYYY-MM)', req: 1, placeholder: '2026-09' },
-      { k: 'days', label: 'Days present', type: 'number', req: 1, hint: 'Out of a 26-day cycle' }, { k: 'ot', label: 'Overtime hours', type: 'number' },
-      { k: 'status', label: 'Status', type: 'select', options: opts(['Pending', 'Paid']) },
-    ],
-    calc: (f) => {
-      const p = d.payLine({ empId: f.empId, days: +f.days || 0, ot: +f.ot || 0 });
-      return [
-        { label: 'Earned base', value: M(p.base) },
-        { label: 'Overtime at 1.5×', value: M(p.ot) },
-        { label: 'Advance deduction', value: '− ' + M(p.ded) },
-        { label: 'Net payable', value: M(p.net) },
-      ];
-    },
-    foot: (rows) => 'Payroll due: ' + M(rows.filter((p) => p.status !== 'Paid').reduce((s, p) => s + d.payLine(p).net, 0)),
-  };
+  if (mod === 'advances') {
+    const P = createPeople(D);
+    return {
+      key: 'advances', add: 'Give advance', dateKey: 'date', statusKey: '_e', statuses: ['All'].concat((D.employees || []).map((e) => e.name)),
+      cols: [
+        { k: 'date', label: 'Date' }, { k: 'time', label: 'Time' }, { k: '_e', label: 'Worker', get: (a) => P.emp(a.empId).name },
+        { k: 'amount', label: 'Advance', t: 'money' }, { k: 'mode', label: 'Paid by' }, { k: 'remarks', label: 'Remarks' },
+        { k: '_due', label: 'Worker owes now', t: 'money', get: (a) => Math.max(0, P.advanceDue(a.empId)) },
+      ],
+      fields: [
+        { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'time', label: 'Time', type: 'time' },
+        { k: 'empId', label: 'Worker', type: 'select', options: (D.employees || []).filter((e) => e.status !== 'Left').map((e) => ({ v: e.id, l: e.name })), req: 1 },
+        { k: 'amount', label: 'Amount (₹)', type: 'number', req: 1 },
+        { k: 'mode', label: 'Paid by', type: 'select', options: opts(['Cash', 'UPI']) },
+        { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+      ],
+      validate: (f) => (String(f.amount ?? '').trim() && !(+f.amount > 0) ? { amount: 'Enter an amount greater than zero.' } : {}),
+      foot: (rows) => 'Advanced in the filtered rows: ' + M(rows.reduce((s, a) => s + (+a.amount || 0), 0)) + ' · recovered from Saturday salaries',
+    };
+  }
 
   return null;
 }
@@ -373,12 +347,6 @@ export function listKpis(mod, rows, d) {
       { label: 'Credit', value: M(credit()), note: 'Money in' },
       { label: 'Net burn', value: M(debit() - credit()), note: 'Filtered range' },
     ],
-    payroll: () => [
-      { label: 'Gross payable', value: M(sum(rows, (p) => d.payLine(p).base + d.payLine(p).ot)), note: 'Base plus overtime' },
-      { label: 'Advance recovery', value: M(sum(rows, (p) => d.payLine(p).ded)), note: 'Deducted this cycle' },
-      { label: 'Net payable', value: M(sum(rows, (p) => d.payLine(p).net)), note: rows.length + ' payroll lines' },
-      { label: 'Still pending', value: M(sum(rows.filter((p) => p.status !== 'Paid'), (p) => d.payLine(p).net)), note: rows.filter((p) => p.status !== 'Paid').length + ' unpaid' },
-    ],
     customers: () => [
       { label: 'Credit parties', value: String(rows.length), note: rows.filter((x) => x.status === 'On hold').length + ' on hold' },
       { label: 'Outstanding', value: M(sum(rows, d.outstanding)), note: rows.filter((x) => d.outstanding(x) > 0).length + ' parties owe us' },
@@ -402,19 +370,13 @@ export function listKpis(mod, rows, d) {
       { label: 'We buy', value: String(rows.filter((x) => x.kind === 'purchase').length), note: 'Soling (boulder)' },
     ],
     employees: () => [
-      { label: 'Headcount', value: String(rows.length), note: rows.filter((x) => x.status !== 'Active').length + ' on leave' },
-      { label: 'Monthly wage bill', value: M(sum(rows, (x) => x.salary)), note: 'At full attendance' },
-      { label: 'Advances outstanding', value: M(sum(D.advances, (x) => x.amount - x.recovered)), note: 'Recoverable from salary' },
-    ],
-    attendance: () => [
-      { label: 'Present', value: String(rows.filter((x) => x.status === 'Present').length), note: 'Filtered rows' },
-      { label: 'Absent / leave', value: String(rows.filter((x) => x.status === 'Absent' || x.status === 'Leave').length), note: 'Deducted from payroll' },
-      { label: 'Overtime', value: N(sum(rows, (x) => +x.ot || 0)) + ' hrs', note: 'Paid at 1.5×' },
+      { label: 'Workers', value: String(rows.filter((x) => x.status !== 'Left').length), note: rows.filter((x) => x.status === 'Left').length + ' left' },
+      { label: 'Daily wage bill', value: M(sum(rows.filter((x) => x.status !== 'Left'), (x) => +x.wage || 0)), note: 'If everyone works a full day' },
+      { label: 'Advances due', value: M(sum(D.employees || [], (x) => Math.max(0, createPeople(D).advanceDue(x.id)))), note: 'Recovered from Saturday salaries' },
     ],
     advances: () => [
-      { label: 'Advanced', value: M(sum(rows, (x) => x.amount)), note: rows.length + ' entries' },
-      { label: 'Recovered', value: M(sum(rows, (x) => x.recovered)), note: 'Against salary' },
-      { label: 'Balance', value: M(sum(rows, (x) => x.amount - x.recovered)), note: 'Still to recover' },
+      { label: 'Advanced', value: M(sum(rows, (x) => +x.amount || 0)), note: rows.length + ' entries' },
+      { label: 'Still due from workers', value: M(sum(D.employees || [], (x) => Math.max(0, createPeople(D).advanceDue(x.id)))), note: 'All workers' },
     ],
   };
   return (K[mod] || (() => []))();

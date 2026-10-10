@@ -11,7 +11,7 @@ export const REPORTS = [
   { v: 'collections', l: 'Collections', sub: 'Every payment received, and money parties sent straight to others' },
   { v: 'soling', l: 'Soling purchases', sub: 'Loads, tons, value and payments for each soling supplier' },
   { v: 'expenses', l: 'Expenses', sub: 'Every expense and other income, with totals by head' },
-  { v: 'profit', l: 'Profit summary', sub: 'Sales − soling bought − expenses + other income' },
+  { v: 'profit', l: 'Profit summary', sub: 'Sales − soling bought − wages − expenses + other income' },
 ];
 
 const r2 = (n) => Math.round((+n || 0) * 100) / 100;
@@ -155,7 +155,7 @@ export function buildReport(kind, d, from, to) {
     sections: [{
       fmt: ['', 'm'],
       head: ['', 'Amount (Rs.)'],
-      body: [['Sales billed', p.sales], ['Less soling bought', -p.soling], ['Less expenses', -p.expenses], ['Add other income', p.income]],
+      body: [['Sales billed', p.sales], ['Less soling bought', -p.soling], ['Less wages (salaries paid)', -p.wages], ['Less expenses', -p.expenses], ['Add other income', p.income]],
       foot: [p.net >= 0 ? 'Profit' : 'Loss', p.net],
     }],
   };
@@ -206,4 +206,32 @@ export async function exportAll(db, today) {
     X.utils.book_append_sheet(wb, X.utils.json_to_sheet(rows.length ? rows : [{}]), name.slice(0, 31));
   });
   X.writeFile(wb, 'agbm-backup-' + today + '.xlsx');
+}
+
+// Saturday salary statement: days, earned, this week's advance, overall advance, recovered and net pay per worker.
+// recovers: { empId: amount staff typed } for workers not yet paid.
+export function buildSalaryStatement(P, weekEnd, days, recovers = {}) {
+  const lines = P.weekLines(weekEnd);
+  const short = (iso) => iso.slice(8) + '/' + iso.slice(5, 7);
+  const mark = { Present: 'P', 'Half day': '1/2', Absent: 'A' };
+  const body = lines.map((l) => {
+    const v = l.paid ? l.paid : { ...P.settle(l, recovers[l.emp.id]), earned: l.earned };
+    return [
+      l.emp.name, +l.emp.wage || 0, ...days.map((x) => (l.marks[x] ? mark[l.marks[x].status] : '-')), l.worked, v.earned,
+      l.weekAdv, l.oldDue, v.cutWeek + v.cutOld, Math.max(0, P.advanceDue(l.emp.id) - (l.paid ? 0 : v.cutWeek + v.cutOld)), v.net,
+      l.paid ? 'Paid ' + l.paid.date : 'Due',
+    ];
+  });
+  const total = (i) => body.reduce((s, r) => s + (+r[i] || 0), 0);
+  const n = days.length;
+  return {
+    title: 'Salary statement — week ending ' + weekEnd, file: 'agbm-salary-week-' + weekEnd, orientation: 'landscape',
+    lines: ['Week: ' + days[0] + ' to ' + weekEnd + '  (P present, 1/2 half day, A absent)', 'Advance balance after = all advances still due once this week is paid.'],
+    sections: [{
+      fmt: ['', 'm', ...days.map(() => ''), '', 'm', 'm', 'm', 'm', 'm', 'm', ''],
+      head: ['Worker', 'Wage/day', ...days.map(short), 'Days', 'Earned', 'Week advance', 'Overall advance', 'Recovered', 'Advance balance after', 'Net pay', 'Status'],
+      body,
+      foot: ['Total', '', ...days.map(() => ''), total(n + 2), total(n + 3), total(n + 4), total(n + 5), total(n + 6), total(n + 7), total(n + 8), ''],
+    }],
+  };
 }

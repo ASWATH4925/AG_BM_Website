@@ -5,6 +5,7 @@ import Tag from '../components/Tag';
 import { TODAY } from '../config';
 import { isoDate, M, N, T, U } from '../lib/format';
 import { isPaidMethod, METHOD_LABEL } from '../lib/payments';
+import { createPeople, weekEndOf } from '../lib/people';
 
 const TABS = ['Overview', 'Yard', 'Ledger'];
 
@@ -28,7 +29,8 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty }) {
   const outs = D.customers.reduce((a, c) => a + d.outstanding(c), 0);
   const burn = D.expenses.filter((x) => x.type === 'Debit').reduce((a, x) => a + x.amount, 0)
     - D.expenses.filter((x) => x.type === 'Credit').reduce((a, x) => a + x.amount, 0);
-  const duePay = D.payroll.filter((p) => p.status !== 'Paid').reduce((a, p) => a + d.payLine(p).net, 0);
+  const payWeek = weekEndOf(day);
+  const duePay = createPeople(D).dueFor(payWeek);
   const prevDate = done.map((o) => o.date).filter((x) => x < day).sort().pop() || null;
   const prev = prevDate ? done.filter((o) => o.date === prevDate) : [];
   const prevTons = prev.reduce((a, o) => a + d.net(o), 0);
@@ -62,12 +64,12 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty }) {
   const minorKpis = [
     { label: 'On the bridge', value: String(D.onsite.length), note: D.onsite.length ? 'Awaiting weigh-out' : 'Platform clear' },
     { label: 'We owe suppliers', value: M(oweSup), note: 'Soling, after payments' },
-    { label: 'Payroll due', value: M(duePay), note: 'net of advances' },
+    { label: 'Salary due', value: M(duePay), note: 'Week ending ' + payWeek.slice(5) + ', after advances' },
     { label: 'Expense burn', value: M(burn), note: 'Sept to date' },
   ];
   const ledgerKpis = [
     { label: 'Outstanding credit', value: M(outs), note: 'Across every account on terms' },
-    { label: 'Payroll due', value: M(duePay), note: 'Aug cycle, net of advances' },
+    { label: 'Salary due', value: M(duePay), note: 'Unpaid for the week ending ' + payWeek },
     { label: 'Expense burn', value: M(burn), note: 'September to date, net' },
     { label: 'We owe suppliers', value: M(oweSup), note: (D.suppliers || []).filter((p) => d.owed(p) > 0.5).length + ' soling suppliers' },
   ];

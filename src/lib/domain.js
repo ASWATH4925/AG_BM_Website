@@ -48,7 +48,6 @@ export function createDomain(db) {
   const cust = (id) => db.customers.find((c) => c.id === id) || { name: '—' };
   const supplier = (id) => (db.suppliers || []).find((p) => p.id === id) || { name: '—' };
   const mat = (id) => db.materials.find((m) => m.id === id) || { name: '—' };
-  const emp = (id) => db.employees.find((e) => e.id === id) || { name: '—', salary: 0 };
   const salesMaterials = () => db.materials.filter((m) => m.kind !== 'purchase');
 
   // Rate in force on a date: the party's own card first, then the standard card, else none.
@@ -155,31 +154,10 @@ export function createDomain(db) {
     return { opening, rows: inRange, debit: sum('debit'), credit: sum('credit'), closing: bal };
   };
 
-  const hours = (a) => {
-    if (!a.in || a.in === '—') return 0;
-    const p = (t) => {
-      const x = t.split(':');
-      return +x[0] + +x[1] / 60;
-    };
-    return Math.max(0, p(a.out) - p(a.in));
-  };
-  const advanceBalance = (empId, openOnly) =>
-    db.advances
-      .filter((a) => a.empId === empId && (!openOnly || a.status !== 'Cleared'))
-      .reduce((s, a) => s + (a.amount - a.recovered), 0);
-  const payLine = (p) => {
-    const e = emp(p.empId);
-    const base = (e.salary / 26) * p.days;
-    const ot = p.ot * (e.salary / 26 / 8) * 1.5;
-    const ded = Math.min(advanceBalance(p.empId, true), 4000);
-    return { base, ot, ded, net: base + ot - ded };
-  };
-
   return {
-    db, cust, supplier, mat, emp, salesMaterials, rateFor, orderRate, matLabel,
+    db, cust, supplier, mat, salesMaterials, rateFor, orderRate, matLabel,
     net, amount, extras, billTotal, partyLabel, paymentsFor, receiptsOf, paidOn, onCredit, loadsOf, billed, received, outstanding, lastReceipt, ledger,
     solRateFor, solRate, solAmount, solValue, solLoadsOf, supplierPaysOf, supplied, paidToSupplier, owed, lastSupplierPay, supLedger,
-    hours, advanceBalance, payLine,
   };
 }
 

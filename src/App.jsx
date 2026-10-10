@@ -15,9 +15,12 @@ import { hhmm, isoDate, M, N, T } from './lib/format';
 import { MODS, moduleConfig } from './lib/modules';
 import { loadSaved, save as saveToBrowser } from './lib/storage';
 import CreditParties from './views/CreditParties';
+import Attendance from './views/Attendance';
 import Dashboard from './views/Dashboard';
 import DayBook from './views/DayBook';
 import Reports from './views/Reports';
+import Salary from './views/Salary';
+import { createPeople, weekDays } from './lib/people';
 import ListModule from './views/ListModule';
 import Login from './views/Login';
 import PartyDetail, { StandardRates } from './views/PartyDetail';
@@ -25,12 +28,12 @@ import Profile from './views/Profile';
 import VoidedEntries from './views/VoidedEntries';
 import Weighbridge from './views/Weighbridge';
 
-const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'salary', 'tare', 'gross', 'days', 'ot', 'recovered', 'received', 'gst', 'rent', 'extra'];
+const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'wage', 'tare', 'gross', 'days', 'ot', 'recovered', 'received', 'gst', 'rent', 'extra'];
 const FILTERS_CLEAR = { q: '', status: 'All', from: '', to: '', sortK: null };
 const RECEIPT_METHODS = ['Cash', 'UPI', 'Account', 'Cheque'].map((x) => ({ v: x, l: METHOD_LABEL[x] || x }));
 // Modules drawn by their own view instead of the generic list (their config still drives add/edit forms).
 const CUSTOM_LISTS = ['customers', 'suppliers', 'voids'];
-const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports'];
+const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports', 'attendance', 'payroll'];
 const SIGNED_IN_AS = 'A. Gopalakrishnan';
 
 const isWide = () => window.innerWidth >= 900;
@@ -76,6 +79,7 @@ export default function App() {
   const [s, setS] = useState(initialState);
   const set = useCallback((patch) => setS((prev) => ({ ...prev, ...(typeof patch === 'function' ? patch(prev) : patch) })), []);
   const d = useMemo(() => createDomain(s.db), [s.db]);
+  const P = useMemo(() => createPeople(s.db), [s.db]);
   const toastTimer = useRef(null);
 
   // Live scale: eases toward the target weight with a little noise, like a load cell settling.
@@ -442,6 +446,66 @@ export default function App() {
     toast(next.serial + ' updated' + (billChanged ? ' — the bill is now ' + M(rowBill(d, next).bill) + '; check its payment.' : '.'));
   };
 
+  // ---- workers: attendance, advances, Saturday salary ----
+  const saveAttendance = (date, rows) => {
+    set((st) => {
+      const others = (st.db.attendance || []).filter((a) => a.date !== date);
+      const old = (st.db.attendance || []).filter((a) => a.date === date);
+      const marked = rows.filter((r) => r.status).map((r, i) => {
+        const was = old.find((a) => a.empId === r.emp.id);
+        return {
+          id: was ? was.id : 'A' + Date.now() + '-' + i, date, empId: r.emp.id, status: r.status,
+          wage: was ? was.wage : +r.emp.wage || 0, remarks: String(r.remarks || '').trim(), by: SIGNED_IN_AS,
+        };
+      });
+      return { db: { ...st.db, attendance: others.concat(marked) } };
+    });
+    const n = (k) => rows.filter((r) => r.status === k).length;
+    toast('Attendance for ' + date + ' saved — ' + n('Present') + ' present, ' + n('Half day') + ' half day, ' + n('Absent') + ' absent.');
+  };
+
+  const openAdvance = (empId, date) => {
+    const c = cfgOf('advances');
+    const f = {};
+    c.fields.forEach((x) => { f[x.k] = x.type === 'select' ? (x.options[0] ? x.options[0].v : '') : x.type === 'date' ? isoDate() : x.type === 'time' ? hhmm() : ''; });
+    if (empId) f.empId = empId;
+    if (date) f.date = date;
+    f.mode = 'Cash';
+    set({ modal: { kind: 'form', cfgMod: 'advances', title: 'Give advance' + (empId ? ' — ' + P.emp(empId).name : ''), kicker: 'Worker advance', confirmLabel: 'Save advance' }, form: f, errors: {} });
+  };
+
+  const salaryRecord = (line, recover, extra) => {
+    const v = P.settle(line, recover);
+    return {
+      id: 'W' + Date.now() + '-' + line.emp.id, weekEnd: line.weekEnd, empId: line.emp.id, worked: line.worked, earned: line.earned,
+      cutWeek: v.cutWeek, cutOld: v.cutOld, net: v.net, by: SIGNED_IN_AS, remarks: '', ...extra,
+    };
+  };
+  const payDate = (weekEnd) => (isoDate() < weekEnd ? isoDate() : weekEnd);
+  const openSalaryPay = (line, recover) => set({
+    modal: { kind: 'salary', line, title: 'Pay ' + line.emp.name, kicker: 'Salary · week ending ' + line.weekEnd, confirmLabel: 'Save payment' },
+    form: { recover: recover || '', mode: 'Cash', date: payDate(line.weekEnd), time: hhmm(), remarks: '' }, errors: {},
+  });
+  const saveSalary = () => {
+    const { line } = s.modal;
+    const f = s.form;
+    if (String(f.recover ?? '').trim() && !(+f.recover >= 0)) { set({ errors: { recover: 'Enter an amount, or leave it blank.' } }); return; }
+    if (!f.date) { set({ errors: { date: 'Required.' } }); return; }
+    const rec = salaryRecord(line, f.recover, { date: f.date, time: f.time || hhmm(), mode: f.mode, remarks: String(f.remarks || '').trim() });
+    set((st) => ({ db: { ...st.db, payroll: (st.db.payroll || []).concat([rec]) }, modal: null }));
+    toast(M(rec.net) + ' paid to ' + line.emp.name + (rec.cutWeek + rec.cutOld ? ' after ' + M(rec.cutWeek + rec.cutOld) + ' advance taken back.' : '.'));
+  };
+  const payAllSalaries = (items) => {
+    const recs = items.map(({ line, recover }) => salaryRecord(line, recover, { date: payDate(line.weekEnd), time: hhmm(), mode: 'Cash' }));
+    set((st) => ({ db: { ...st.db, payroll: (st.db.payroll || []).concat(recs) } }));
+    toast(recs.length + ' workers paid ' + M(recs.reduce((t, r) => t + r.net, 0)) + ' in cash.');
+  };
+  const salaryStatement = async (weekEnd, recovers) => {
+    const { buildSalaryStatement, reportPdf } = await import('./lib/exports');
+    await reportPdf(buildSalaryStatement(P, weekEnd, weekDays(weekEnd), recovers));
+    toast('Salary statement downloaded.');
+  };
+
   // ---- day book ----
   const openExpense = () => {
     const c = cfgOf('expenses');
@@ -562,6 +626,8 @@ export default function App() {
         records: { suppliers: [row], purchases: loads, supPayments: (D.supPayments || []).filter((p) => p.supplierId === row.id), solRates: (D.solRates || []).filter((r) => r.supplierId === row.id) },
       };
     }
+    if (key === 'advances') return { kind: 'Advance', label: P.emp(row.empId).name + ' · ' + row.date + (row.remarks ? ' · ' + row.remarks : ''), amount: +row.amount || 0, records: { advances: [row] } };
+    if (key === 'payroll') return { kind: 'Salary payment', label: P.emp(row.empId).name + ' · week ending ' + row.weekEnd, amount: +row.net || 0, records: { payroll: [row] } };
     if (key === 'expenses') return { kind: row.type === 'Credit' ? 'Other income' : 'Expense', label: (row.head === 'Other' && row.headOther ? row.headOther : row.head) + ' · ' + (row.party || '') + ' · ' + row.date, amount: +row.amount || 0, records: { expenses: [row] } };
     if (key === 'staging') return { kind: 'Import row', label: row.serial + ' · ' + row.name + ' · ' + row.material + ' · ' + row.date, amount: row.amount, records: { staging: [row] } };
     return { kind: KIND_NAME[key] || 'Record', label: row.name || row.ticket || row.head || row.code || row.id, amount: row.amount || null, records: { [key]: [row] } };
@@ -819,6 +885,13 @@ export default function App() {
           ...(m.sale ? [] : [{ k: 'extra', label: 'Extra charges (₹)', type: 'number', hint: 'Rent, unloading — added to what we owe' }]),
           { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
         ]
+        : m.kind === 'salary' ? [
+          ...((m.line.oldDue > 0 || m.line.weekAdv > m.line.earned) ? [{ k: 'recover', label: 'Recover from older advance (₹)', type: 'number', hint: 'Older advance due ' + M(m.line.oldDue) + ' — leave blank to recover nothing', span: 'span 2' }] : []),
+          { k: 'mode', label: 'Paid by', type: 'select', options: RECEIPT_METHODS },
+          { k: 'date', label: 'Date', type: 'date' },
+          { k: 'time', label: 'Time', type: 'time' },
+          { k: 'remarks', label: 'Remarks', hint: 'Optional' },
+        ]
         : m.kind === 'opening' ? [
           { k: 'startDate', label: 'Balances as at the start of', type: 'date', span: 'span 2' },
           { k: 'cashStart', label: 'Cash in hand (₹)', type: 'number' },
@@ -861,6 +934,16 @@ export default function App() {
       errors: s.errors,
       setField: (k, v) => set((st) => ({ form: { ...st.form, [k]: v }, errors: { ...st.errors, [k]: null } })),
       calcLines: formCfg && formCfg.calc ? formCfg.calc(s.form)
+        : m.kind === 'salary' ? (() => {
+          const v = P.settle(m.line, s.form.recover);
+          return [
+            { label: 'Days worked', value: String(m.line.worked) },
+            { label: 'Earned', value: M(m.line.earned) },
+            { label: "This week's advance", value: '− ' + M(v.cutWeek) },
+            { label: 'Older advance recovered', value: '− ' + M(v.cutOld) },
+            { label: 'Net pay', value: M(v.net) },
+          ];
+        })()
         : m.kind === 'stagedEdit' ? (() => {
           const net = Math.max(0, (+s.form.loaded || 0) - (+s.form.empty || 0)) / 1000;
           if (m.sale) {
@@ -880,7 +963,7 @@ export default function App() {
           ];
         })() : null,
       onConfirm: {
-        delete: doDelete, void: doVoid, receipt: postReceipt, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
+        delete: doDelete, void: doVoid, receipt: postReceipt, salary: saveSalary, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
         clearStaging: () => {
           const rows = s.db.staging;
           const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
@@ -917,8 +1000,8 @@ export default function App() {
             tons={T(tonsToday) + ' t'}
             now={s.now}
             onWeighbridge={() => go('weighbridge')}
-            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : sup ? 'Add soling load' : s.mod === 'daybook' ? 'Add expense' : s.mod === 'customers' ? 'New credit party' : s.mod === 'suppliers' ? 'New soling supplier' : 'New entry'}
-            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : sup ? () => openNewSoling(sup.id) : s.mod === 'daybook' ? openExpense : openAdd}
+            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : sup ? 'Add soling load' : s.mod === 'daybook' ? 'Add expense' : s.mod === 'attendance' || s.mod === 'payroll' ? 'Give advance' : s.mod === 'customers' ? 'New credit party' : s.mod === 'suppliers' ? 'New soling supplier' : 'New entry'}
+            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : sup ? () => openNewSoling(sup.id) : s.mod === 'daybook' ? openExpense : s.mod === 'attendance' || s.mod === 'payroll' ? () => openAdvance('', '') : openAdd}
           />
           <main
             className="ag-main"
@@ -984,6 +1067,17 @@ export default function App() {
             )}
             {s.mod === 'customers' && (
               <CreditParties d={d} onOpen={openParty} onAdd={openAdd} onReport={() => openReport('', 'statement')} />
+            )}
+            {s.mod === 'attendance' && <Attendance d={d} P={P} onSave={saveAttendance} onAdvance={openAdvance} />}
+            {s.mod === 'payroll' && (
+              <Salary
+                d={d}
+                P={P}
+                onPay={openSalaryPay}
+                onPayAll={payAllSalaries}
+                onUndo={(rec) => askDelete(rec, 'payroll')}
+                onStatement={salaryStatement}
+              />
             )}
             {s.mod === 'daybook' && (
               <DayBook

@@ -1,5 +1,5 @@
 // Seed records for the yard. Parties, materials, rates and tickets are taken from the 22 Aug and 8 Oct 2026 registers;
-// staff, attendance, advances, payroll and expenses are demo entries.
+// workers, attendance, advances and expenses are sample entries.
 
 // Credit parties (they owe us). Owner, address and contact are filled in by the office.
 const cust = [
@@ -66,46 +66,34 @@ const ord = [
   tare: r[6], gross: r[7], manualRate: '', method: 'Credit', status: 'Completed', reason: '', remarks: '', by: 'Murugan R',
 }));
 
+// Daily-wage workers, paid every Saturday. Sample week: Mon 5 – Wed 7 Oct marked; Thu 8 Oct left for staff to mark.
 const emp = [
-  { id: 'E01', code: 'EM-01', name: 'Murugan R', role: 'Weighbridge Operator', phone: '98430 11902', joined: '2021-04-12', salary: 24000, status: 'Active' },
-  { id: 'E02', code: 'EM-02', name: 'Selvam K', role: 'Driver', phone: '99524 88210', joined: '2022-01-08', salary: 21000, status: 'Active' },
-  { id: 'E03', code: 'EM-03', name: 'Anitha P', role: 'Accounts', phone: '94879 30144', joined: '2020-11-02', salary: 28000, status: 'Active' },
-  { id: 'E04', code: 'EM-04', name: 'Bhaskar N', role: 'Loading Supervisor', phone: '90031 74558', joined: '2019-06-20', salary: 26000, status: 'Active' },
-  { id: 'E05', code: 'EM-05', name: 'Kumar S', role: 'Driver', phone: '97865 20913', joined: '2023-03-15', salary: 21000, status: 'Active' },
-  { id: 'E06', code: 'EM-06', name: 'Jayanthi M', role: 'Front Office', phone: '98652 41027', joined: '2024-07-01', salary: 19000, status: 'Active' },
-  { id: 'E07', code: 'EM-07', name: 'Ravi T', role: 'JCB Operator', phone: '95001 66284', joined: '2022-09-09', salary: 27000, status: 'On leave' },
-  { id: 'E08', code: 'EM-08', name: 'Dinesh V', role: 'Driver', phone: '96775 39418', joined: '2025-02-17', salary: 21000, status: 'Active' }
-];
-const att = [
-  ['2026-09-09', 'E01', 'Day A', '07:52', '18:10', 'Present', 2],
-  ['2026-09-09', 'E02', 'Day A', '06:40', '17:05', 'Present', 1],
-  ['2026-09-09', 'E03', 'General', '09:05', '18:00', 'Present', 0],
-  ['2026-09-09', 'E04', 'Day A', '07:30', '19:20', 'Present', 3],
-  ['2026-09-09', 'E05', 'Day A', '—', '—', 'Absent', 0],
-  ['2026-09-09', 'E06', 'General', '09:15', '14:00', 'Half day', 0],
-  ['2026-09-08', 'E01', 'Day A', '07:48', '18:02', 'Present', 2],
-  ['2026-09-08', 'E02', 'Day A', '06:35', '18:40', 'Present', 2],
-  ['2026-09-08', 'E04', 'Day A', '07:34', '17:50', 'Present', 0],
-  ['2026-09-08', 'E07', 'Day B', '—', '—', 'Leave', 0],
-  ['2026-09-08', 'E08', 'Day B', '13:00', '22:15', 'Present', 1]
-].map((r, i) => ({ id: 'A' + i, date: r[0], empId: r[1], shift: r[2], in: r[3], out: r[4], status: r[5], ot: r[6] }));
+  ['Murugan R', 'Weighbridge operator', '98430 11902', 900],
+  ['Selvam K', 'Driver', '99524 88210', 800],
+  ['Bhaskar N', 'Loading supervisor', '90031 74558', 850],
+  ['Kumar S', 'Driver', '97865 20913', 800],
+  ['Ravi T', 'JCB operator', '95001 66284', 1000],
+  ['Dinesh V', 'Helper', '96775 39418', 600],
+  ['Muthu P', 'Loader', '', 650],
+  ['Raja M', 'Loader', '', 650],
+].map((r, i) => ({
+  id: 'E0' + (i + 1), code: 'EM-0' + (i + 1), name: r[0], role: r[1], phone: r[2], joined: '', wage: r[3], status: 'Active', remarks: '',
+}));
+const marks = {
+  '2026-10-05': ['Present', 'Present', 'Present', 'Present', 'Present', 'Present', 'Present', 'Absent'],
+  '2026-10-06': ['Present', 'Present', 'Present', 'Half day', 'Present', 'Present', 'Present', 'Present'],
+  '2026-10-07': ['Present', 'Absent', 'Present', 'Present', 'Present', 'Half day', 'Present', 'Present'],
+};
+const att = Object.entries(marks).flatMap(([date, list]) => list.map((status, i) => ({
+  id: 'A' + date.slice(-2) + i, date, empId: emp[i].id, status, wage: emp[i].wage,
+  remarks: status === 'Absent' ? 'Informed' : status === 'Half day' ? 'Left after lunch' : '', by: 'Murugan R',
+})));
 const adv = [
-  { id: 'V01', date: '2026-08-28', empId: 'E02', amount: 8000, reason: 'Medical', recovered: 4000, status: 'Recovering' },
-  { id: 'V02', date: '2026-09-02', empId: 'E05', amount: 5000, reason: 'Festival', recovered: 0, status: 'Open' },
-  { id: 'V03', date: '2026-07-14', empId: 'E04', amount: 12000, reason: 'House rent', recovered: 12000, status: 'Cleared' },
-  { id: 'V04', date: '2026-09-06', empId: 'E08', amount: 3500, reason: 'Travel', recovered: 0, status: 'Open' },
-  { id: 'V05', date: '2026-08-19', empId: 'E01', amount: 6000, reason: 'School fees', recovered: 2000, status: 'Recovering' }
+  { id: 'V01', date: '2026-09-26', time: '18:10', empId: 'E02', amount: 2000, mode: 'Cash', remarks: 'Medical', by: 'A. Gopalakrishnan' },
+  { id: 'V02', date: '2026-10-06', time: '18:30', empId: 'E04', amount: 300, mode: 'Cash', remarks: '', by: 'A. Gopalakrishnan' },
+  { id: 'V03', date: '2026-10-07', time: '18:20', empId: 'E07', amount: 200, mode: 'UPI', remarks: '', by: 'A. Gopalakrishnan' },
 ];
-const pay = [
-  { id: 'P01', empId: 'E01', month: '2026-08', days: 26, ot: 14, status: 'Paid' },
-  { id: 'P02', empId: 'E02', month: '2026-08', days: 24, ot: 22, status: 'Paid' },
-  { id: 'P03', empId: 'E03', month: '2026-08', days: 26, ot: 0, status: 'Paid' },
-  { id: 'P04', empId: 'E04', month: '2026-08', days: 25, ot: 18, status: 'Paid' },
-  { id: 'P05', empId: 'E05', month: '2026-08', days: 22, ot: 6, status: 'Pending' },
-  { id: 'P06', empId: 'E06', month: '2026-08', days: 23, ot: 0, status: 'Pending' },
-  { id: 'P07', empId: 'E07', month: '2026-08', days: 18, ot: 0, status: 'Pending' },
-  { id: 'P08', empId: 'E08', month: '2026-08', days: 26, ot: 11, status: 'Pending' }
-];
+const pay = [];
 const exp = [
   { id: 'X01', date: '2026-09-09', head: 'Diesel', desc: 'HSD 420 L — tipper fleet', type: 'Debit', amount: 39480, mode: 'Bank Transfer', party: 'Kaveri Fuels' },
   { id: 'X02', date: '2026-09-08', head: 'Vehicle repair', desc: 'Rear axle bushing TN 70 Z 3321', type: 'Debit', amount: 14200, mode: 'Cash', party: 'Sakthi Auto Works' },
@@ -175,11 +163,18 @@ export function seedDb() {
   }));
 }
 
+// Workers, attendance, advances and salaries on their own, for replacing the old monthly-salary demo records.
+export function peopleSeed() {
+  return JSON.parse(JSON.stringify({ employees: emp, attendance: att, advances: adv, payroll: pay }));
+}
+
 // Fills in collections added after a browser first saved its data, so older saves keep working.
 export function upgradeDb(saved) {
   const db = { payments: [], purchases: [], staging: [], imports: [], suppliers: [], voided: [], supPayments: [], ...saved };
   if (!db.solRates) db.solRates = JSON.parse(JSON.stringify(solRates));
   db.purchases = db.purchases.map(normalSoling);
+  // Saves from before daily wages held demo monthly salaries; start them on the daily-wage sample instead.
+  if (!(db.employees || []).some((e) => 'wage' in e)) Object.assign(db, peopleSeed());
   if (!db.settings) db.settings = { cashStart: 0, bankStart: 0, startDate: '' };
   db.expenses = (db.expenses || []).map((x) => ({ time: '', headOther: '', ...x, mode: x.mode === 'Bank Transfer' ? 'Account' : x.mode, head: x.head === 'Electricity' ? 'Electricity (EB)' : x.head }));
   db.voided = db.voided.map((e) => (e.records && e.records.purchases ? { ...e, records: { ...e.records, purchases: e.records.purchases.map(normalSoling) } } : e));

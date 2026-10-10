@@ -46,6 +46,15 @@ function movements(d) {
     flows.push({ date: p.date, time: p.time || '', who: d.supplier(p.supplierId).name, mode: p.method, amount: p.amount, ref: p.ref || '', remarks: p.remarks || '', what: 'Paid to soling supplier', dir: 'out', kind: 'Soling supplier', src: 'supPayments', rec: p });
   });
 
+  const worker = (id) => ((D.employees || []).find((e) => e.id === id) || { name: '—' }).name;
+  (D.advances || []).forEach((a) => {
+    flows.push({ date: a.date, time: a.time || '', who: worker(a.empId), mode: a.mode || 'Cash', amount: +a.amount || 0, ref: '', remarks: a.remarks || '', what: 'Advance to worker', dir: 'out', kind: 'Wages', src: 'advances', rec: a });
+  });
+  (D.payroll || []).forEach((p) => {
+    if (!(+p.net > 0)) return;
+    flows.push({ date: p.date, time: p.time || '', who: worker(p.empId), mode: p.mode || 'Cash', amount: +p.net, ref: '', remarks: p.remarks || '', what: 'Salary, week ending ' + p.weekEnd, dir: 'out', kind: 'Wages', src: 'payroll', rec: p });
+  });
+
   (D.expenses || []).forEach((x) => {
     if (x.mode === 'Credit') return; // not paid yet
     const income = x.type === 'Credit';
@@ -125,10 +134,17 @@ export function expenseSummary(d, from, to) {
   return { list, spent, income, byHead: Object.entries(byHead).sort((a, b) => b[1] - a[1]), spentTotal: total(spent), incomeTotal: total(income) };
 }
 
-// Rough profit for a period: sales billed − soling bought − expenses + other income.
+// Wages earned in salaries paid for weeks ending in the period (advances are recovered, so they are not a cost).
+export function wagesSummary(d, from, to) {
+  const list = (d.db.payroll || []).filter((p) => inRange(p.weekEnd, from, to));
+  return { list, earned: list.reduce((s, p) => s + (+p.earned || 0), 0), paid: list.reduce((s, p) => s + (+p.net || 0), 0) };
+}
+
+// Rough profit for a period: sales billed − soling bought − wages − expenses + other income.
 export function profitSummary(d, from, to) {
   const s = salesSummary(d, from, to);
   const so = solingSummary(d, from, to);
   const e = expenseSummary(d, from, to);
-  return { sales: s.value, soling: so.value, expenses: e.spentTotal, income: e.incomeTotal, net: s.value - so.value - e.spentTotal + e.incomeTotal };
+  const w = wagesSummary(d, from, to);
+  return { sales: s.value, soling: so.value, wages: w.earned, expenses: e.spentTotal, income: e.incomeTotal, net: s.value - so.value - w.earned - e.spentTotal + e.incomeTotal };
 }

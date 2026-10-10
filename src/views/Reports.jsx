@@ -69,8 +69,8 @@ export default function Reports({ d, onToast }) {
       <div className="ag-stagger ag-quad" style={{ marginTop: 'var(--space-6)' }}>
         <StatTile label="Sales billed" value={M(p.sales)} note={U(s.tons) + ' units · ' + T(s.tons) + ' t · ' + s.loads.length + ' loads'} />
         <StatTile label="Soling bought" value={M(p.soling)} note="Boulders from suppliers" />
-        <StatTile label="Expenses" value={M(p.expenses)} note={'Other income ' + M(p.income)} />
-        <StatTile label={p.net >= 0 ? 'Profit (rough)' : 'Loss (rough)'} value={M(Math.abs(p.net))} note="Sales − soling − expenses + income" />
+        <StatTile label="Wages & expenses" value={M(p.wages + p.expenses)} note={'Wages ' + M(p.wages) + ' · other income ' + M(p.income)} />
+        <StatTile label={p.net >= 0 ? 'Profit (rough)' : 'Loss (rough)'} value={M(Math.abs(p.net))} note="Sales − soling − wages − expenses + income" />
       </div>
 
       <Panel className="ag-rise" style={{ marginTop: 'var(--space-6)' }} title="Download reports" sub={'For ' + (from || 'the beginning') + ' to ' + (to || 'now') + ' · PDF to print or send, Excel to work with the numbers'}>
