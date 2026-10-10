@@ -152,11 +152,29 @@ const normalSoling = (u) => {
   return { manualRate: '', extra: '', ...rest, tare: +u.gross || 0, gross: +net || 0 };
 };
 
+// Fuel bunk and spares company taken on credit (sample — rename to your own).
+const creditors = [
+  { id: 'K01', code: 'FB-01', kind: 'bunk', name: 'SRI MURUGAN FUELS', owner: '', contact: '', address: '', upi: '', gstin: '', status: 'Active', remarks: 'Sample bunk — rename to your bunk' },
+  { id: 'K02', code: 'SC-01', kind: 'vendor', name: 'KAVERI SPARES', owner: '', contact: '', address: '', upi: '', gstin: '', status: 'Active', remarks: 'Sample company — rename to your supplier' },
+];
+const crBill = (id, creditorId, date, time, extra) => ({
+  id, creditorId, date, time, billNo: '', vehicle: '', forType: '', forSupplierId: '', forName: '', litres: '', rate: '', amount: '', gst: '', items: '', remarks: '', by: 'A. Gopalakrishnan', ...extra,
+});
+const crBills = [
+  crBill('KB1', 'K01', '2026-10-05', '07:30', { billNo: 'S-1021', forType: 'tanker', vehicle: 'TN 32 T 4410', litres: 500, rate: 94.5 }),
+  crBill('KB2', 'K01', '2026-10-06', '08:10', { billNo: 'S-1034', forType: 'own', vehicle: 'TN 32 J 3355', litres: 60, rate: 94.5 }),
+  crBill('KB3', 'K01', '2026-10-07', '17:40', { billNo: 'IND-12', forType: 'soling', forSupplierId: 'P03', vehicle: 'TN85L2226', litres: 80, rate: 94.5, remarks: 'Indent for SR — deduct on their account' }),
+  crBill('KB4', 'K02', '2026-10-03', '12:00', { billNo: 'KS/2291', items: 'Jaw plate, 2 nos', amount: 18000, gst: 3240 }),
+];
+const crPayments = [
+  { id: 'KP1', creditorId: 'K01', date: '2026-10-07', time: '11:00', method: 'Account', amount: 20000, ref: 'NEFT 88123', remarks: '', by: 'A. Gopalakrishnan' },
+];
+
 export const SEED_NEXT_TICKET = 24118;
 
 export function seedDb() {
   return JSON.parse(JSON.stringify({
-    customers: cust, suppliers, materials: mats, rates, orders: ord, payments, purchases, solRates, supPayments: [], staging: [], imports: [], voided: [],
+    customers: cust, suppliers, materials: mats, rates, orders: ord, payments, purchases, solRates, supPayments: [], creditors, crBills, crPayments, staging: [], imports: [], voided: [],
     employees: emp, attendance: att, advances: adv, payroll: pay, onsite,
     expenses: exp.map((x) => ({ time: '', headOther: '', ...x, mode: x.mode === 'Bank Transfer' ? 'Account' : x.mode, head: x.head === 'Electricity' ? 'Electricity (EB)' : x.head })),
     settings: { cashStart: 0, bankStart: 0, startDate: '' },
@@ -175,6 +193,7 @@ export function upgradeDb(saved) {
   db.purchases = db.purchases.map(normalSoling);
   // Saves from before daily wages held demo monthly salaries; start them on the daily-wage sample instead.
   if (!(db.employees || []).some((e) => 'wage' in e)) Object.assign(db, peopleSeed());
+  if (!db.creditors) Object.assign(db, JSON.parse(JSON.stringify({ creditors, crBills, crPayments })));
   if (!db.settings) db.settings = { cashStart: 0, bankStart: 0, startDate: '' };
   db.expenses = (db.expenses || []).map((x) => ({ time: '', headOther: '', ...x, mode: x.mode === 'Bank Transfer' ? 'Account' : x.mode, head: x.head === 'Electricity' ? 'Electricity (EB)' : x.head }));
   db.voided = db.voided.map((e) => (e.records && e.records.purchases ? { ...e, records: { ...e.records, purchases: e.records.purchases.map(normalSoling) } } : e));

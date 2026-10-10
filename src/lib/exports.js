@@ -1,5 +1,5 @@
 import { TONS_PER_UNIT } from './format';
-import { dayBook, expenseHead, expenseSummary, modeName, profitSummary, salesSummary, solingSummary } from './books';
+import { creditorSummary, dayBook, expenseHead, expenseSummary, modeName, profitSummary, salesSummary, solingSummary } from './books';
 
 // Period reports, described once and written out as PDF or Excel.
 // Column formats: 'm' money, 't' tons, 'u' units, '' text. Excel keeps the numbers; the PDF formats them.
@@ -10,8 +10,10 @@ export const REPORTS = [
   { v: 'parties', l: 'Sales by party', sub: 'Loads, value, paid and on credit for each credit party and walk-ins' },
   { v: 'collections', l: 'Collections', sub: 'Every payment received, and money parties sent straight to others' },
   { v: 'soling', l: 'Soling purchases', sub: 'Loads, tons, value and payments for each soling supplier' },
+  { v: 'fuel', l: 'Fuel bunks', sub: 'Fuel taken on credit — litres and amount by bunk, every fill, payments and what we owe' },
+  { v: 'spares', l: 'Spares & purchases', sub: 'Purchase bills by company, payments and what we owe' },
   { v: 'expenses', l: 'Expenses', sub: 'Every expense and other income, with totals by head' },
-  { v: 'profit', l: 'Profit summary', sub: 'Sales − soling bought − wages − expenses + other income' },
+  { v: 'profit', l: 'Profit summary', sub: 'Sales − soling − wages − fuel − spares − expenses + other income' },
 ];
 
 const r2 = (n) => Math.round((+n || 0) * 100) / 100;
@@ -114,7 +116,7 @@ export function buildReport(kind, d, from, to) {
       sections: [
         {
           heading: 'By supplier', fmt: ['', '', 't', 'm', 'm'],
-          head: ['Supplier', 'Loads', 'Tons', 'Value (Rs.)', 'Paid in period (Rs.)'],
+          head: ['Supplier', 'Loads', 'Tons', 'Value incl. passes (Rs.)', 'Paid in period (Rs.)'],
           body: s.bySup.map((g) => [g.name, g.loads, g.tons, g.value, g.paid]),
           foot: ['Total', s.loads.length, s.tons, s.value, s.paid],
         },
@@ -123,6 +125,34 @@ export function buildReport(kind, d, from, to) {
           head: ['Date / time', 'Serial', 'Supplier', 'Vehicle', 'Tons', 'Rate / t', 'Extra', 'Value (Rs.)'],
           body: s.loads.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
             .map((u) => [u.date + ' ' + (u.time || ''), u.serial || '', d.supplier(u.supplierId).name, u.vehicle, d.net(u), d.solRate(u).rate, +u.extra || 0, d.solValue(u)]),
+        },
+      ],
+    };
+  }
+
+  if (kind === 'fuel' || kind === 'spares') {
+    const bunk = kind === 'fuel';
+    const s = creditorSummary(d, bunk ? 'bunk' : 'vendor', from, to);
+    const forLabel = (b) => (b.forType === 'tanker' ? 'Our tanker' : b.forType === 'soling' ? 'Indent - ' + d.supplier(b.forSupplierId).name : b.forType === 'other' ? b.forName || 'Someone else' : 'Our vehicle');
+    return {
+      title: bunk ? 'Fuel bunks' : 'Spares & purchases', file: file(bunk ? 'fuel' : 'spares'), orientation: 'landscape', lines,
+      sections: [
+        {
+          heading: bunk ? 'By bunk' : 'By company', fmt: bunk ? ['', '', 't', 'm', 'm', 'm'] : ['', '', 'm', 'm', 'm'],
+          head: bunk ? ['Bunk', 'Fills', 'Litres', 'Billed (Rs.)', 'Paid in period (Rs.)', 'We owe now (Rs.)'] : ['Company', 'Bills', 'Billed (Rs.)', 'Paid in period (Rs.)', 'We owe now (Rs.)'],
+          body: s.by.map((g) => (bunk ? [g.c.name, g.bills, g.litres, g.value, g.paid, g.owe] : [g.c.name, g.bills, g.value, g.paid, g.owe])),
+          foot: bunk
+            ? ['Total', s.bills.length, s.litres, s.value, s.by.reduce((a, g) => a + g.paid, 0), s.by.reduce((a, g) => a + g.owe, 0)]
+            : ['Total', s.bills.length, s.value, s.by.reduce((a, g) => a + g.paid, 0), s.by.reduce((a, g) => a + g.owe, 0)],
+        },
+        bunk ? {
+          heading: 'Fuel taken', fmt: ['', '', '', '', '', 't', 'm', 'm'],
+          head: ['Date / time', 'Bunk', 'Slip / indent', 'Fuel for', 'Vehicle', 'Litres', 'Price / L', 'Amount (Rs.)'],
+          body: s.bills.map((b) => [b.date + ' ' + (b.time || ''), d.creditor(b.creditorId).name, b.billNo || '', forLabel(b), b.vehicle || '', +b.litres || 0, +b.rate || 0, d.crBillValue(b)]),
+        } : {
+          heading: 'Bills', fmt: ['', '', '', '', 'm', 'm', 'm'],
+          head: ['Date', 'Company', 'Bill no.', 'What was bought', 'Amount', 'GST', 'Total (Rs.)'],
+          body: s.bills.map((b) => [b.date, d.creditor(b.creditorId).name, b.billNo || '', b.items || '', +b.amount || 0, +b.gst || 0, d.crBillValue(b)]),
         },
       ],
     };
@@ -155,7 +185,7 @@ export function buildReport(kind, d, from, to) {
     sections: [{
       fmt: ['', 'm'],
       head: ['', 'Amount (Rs.)'],
-      body: [['Sales billed', p.sales], ['Less soling bought', -p.soling], ['Less wages (salaries paid)', -p.wages], ['Less expenses', -p.expenses], ['Add other income', p.income]],
+      body: [['Sales billed', p.sales], ['Less soling bought', -p.soling], ['Less wages (salaries paid)', -p.wages], ['Less fuel (bunk bills)', -p.fuel], ['Less spares & purchases', -p.spares], ['Less expenses', -p.expenses], ['Add other income', p.income]],
       foot: [p.net >= 0 ? 'Profit' : 'Loss', p.net],
     }],
   };
@@ -232,6 +262,63 @@ export function buildSalaryStatement(P, weekEnd, days, recovers = {}) {
       head: ['Worker', 'Wage/day', ...days.map(short), 'Days', 'Earned', 'Week advance', 'Overall advance', 'Recovered', 'Advance balance after', 'Net pay', 'Status'],
       body,
       foot: ['Total', '', ...days.map(() => ''), total(n + 2), total(n + 3), total(n + 4), total(n + 5), total(n + 6), total(n + 7), total(n + 8), ''],
+    }],
+  };
+}
+
+// Statement, bills or payments for one fuel bunk or spares company.
+export function buildCreditorReport(d, cr, type, from, to) {
+  const bunk = cr.kind === 'bunk';
+  const Lg = d.crLedger(cr.id, from, to);
+  const lines = [
+    (bunk ? 'Bunk: ' : 'Company: ') + cr.name + (cr.code ? '  (' + cr.code + ')' : ''),
+    [cr.owner && 'Contact: ' + cr.owner, cr.contact, cr.upi && 'UPI: ' + cr.upi].filter(Boolean).join('    '),
+    'Period: ' + period(from, to),
+  ].filter(Boolean);
+  const forLabel = (b) => (b.forType === 'tanker' ? 'Our tanker' : b.forType === 'soling' ? 'Indent - ' + d.supplier(b.forSupplierId).name : b.forType === 'other' ? b.forName || 'Someone else' : 'Our vehicle');
+  const billText = (b) => (bunk
+    ? 'Fuel ' + (b.billNo || '') + ' - ' + forLabel(b) + (b.vehicle ? ' - ' + b.vehicle : '') + (+b.litres ? ' - ' + (+b.litres) + ' L' + (+b.rate ? ' x Rs.' + b.rate : '') : '')
+    : 'Bill ' + (b.billNo || '') + ' - ' + (b.items || '') + (+b.gst ? ' + GST ' + b.gst : ''));
+  const file = 'agbm-' + cr.name.replace(/[^A-Za-z0-9]+/g, '-') + '-' + type + '-' + stamp((from || '').slice(0, 10), (to || '').slice(0, 10));
+  if (type === 'bills') {
+    const bills = Lg.rows.filter((r) => r.kind === 'bill').map((r) => r.b);
+    return {
+      title: bunk ? 'Fuel taken' : 'Purchase bills', file, orientation: 'landscape', lines,
+      sections: [bunk ? {
+        fmt: ['', '', '', '', 't', 'm', 'm', ''],
+        head: ['Date / time', 'Slip / indent', 'Fuel for', 'Vehicle', 'Litres', 'Price / L', 'Amount (Rs.)', 'Remarks'],
+        body: bills.map((b) => [b.date + ' ' + (b.time || ''), b.billNo || '', forLabel(b), b.vehicle || '', +b.litres || 0, +b.rate || 0, d.crBillValue(b), b.remarks || '']),
+        foot: ['Total', bills.length + ' fills', '', '', bills.reduce((s, b) => s + (+b.litres || 0), 0), '', bills.reduce((s, b) => s + d.crBillValue(b), 0), ''],
+      } : {
+        fmt: ['', '', '', 'm', 'm', 'm', ''],
+        head: ['Date', 'Bill no.', 'What was bought', 'Amount', 'GST', 'Total (Rs.)', 'Remarks'],
+        body: bills.map((b) => [b.date, b.billNo || '', b.items || '', +b.amount || 0, +b.gst || 0, d.crBillValue(b), b.remarks || '']),
+        foot: ['Total', bills.length + ' bills', '', bills.reduce((s, b) => s + (+b.amount || 0), 0), bills.reduce((s, b) => s + (+b.gst || 0), 0), bills.reduce((s, b) => s + d.crBillValue(b), 0), ''],
+      }],
+    };
+  }
+  if (type === 'payments') {
+    const pays = Lg.rows.filter((r) => r.kind === 'pay');
+    return {
+      title: 'Payments', file, lines,
+      sections: [{
+        fmt: ['', '', '', 'm', '', ''],
+        head: ['Date / time', 'Paid by', 'Method', 'Amount (Rs.)', 'Reference', 'Remarks'],
+        body: pays.map((r) => [r.ts, r.source === 'company' ? 'Company' : r.by, modeName(r.method), r.credit, r.p.ref || '', r.p.remarks || '']),
+        foot: ['Total', pays.length + ' payments', '', pays.reduce((s, r) => s + r.credit, 0), '', ''],
+      }],
+    };
+  }
+  return {
+    title: 'Account statement', file, lines: lines.concat([(Lg.closing >= 0 ? 'Balance payable: ' : 'Paid ahead: ') + rs(Math.abs(Lg.closing))]),
+    sections: [{
+      fmt: ['', '', 'm', 'm', 'm'],
+      head: ['Date / time', 'Particulars', 'Billed (Rs.)', 'Paid (Rs.)', 'We owe (Rs.)'],
+      body: [['', 'Opening balance', '', '', Lg.opening]].concat(Lg.rows.map((r) => [
+        r.ts, r.kind === 'bill' ? billText(r.b) : 'Paid by ' + (r.source === 'company' ? 'company' : r.by) + ' - ' + modeName(r.method) + (r.p.ref ? ' - ' + r.p.ref : ''),
+        r.debit || '', r.credit || '', r.balance,
+      ])),
+      foot: ['', 'Totals for the period', Lg.debit, Lg.credit, Lg.closing],
     }],
   };
 }

@@ -15,7 +15,7 @@ const SHOW = [
   { v: 'cash', l: 'Cash only' },
   { v: 'bank', l: 'Bank & UPI only' },
 ];
-const KIND_TAG = { 'Credit party': 'ag-t-ok', 'Walk-in': 'ag-t-info', 'Other income': 'ag-t-ok', Expense: 'ag-t-bad', 'Soling supplier': 'ag-t-warn', Wages: 'ag-t-warn' };
+const KIND_TAG = { 'Credit party': 'ag-t-ok', 'Walk-in': 'ag-t-info', 'Other income': 'ag-t-ok', Expense: 'ag-t-bad', 'Soling supplier': 'ag-t-warn', Wages: 'ag-t-warn', 'Fuel bunk': 'ag-t-warn', Spares: 'ag-t-warn' };
 
 // Cash book: every rupee in and out for a day or a period, with cash-in-hand and bank balances.
 export default function DayBook({ d, onSetOpening, onAddExpense, onEditExpense, onDeleteExpense, onOpenParty, onOpenSupplier }) {

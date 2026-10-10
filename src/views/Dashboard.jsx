@@ -49,6 +49,7 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty }) {
     g.count += 1;
     g.methods[x.method] = (g.methods[x.method] || 0) + x.amount;
     if (x.p && x.p.toType === 'supplier') g.toSup.push(M(x.amount) + ' → ' + d.supplier(x.p.supplierId).name);
+    if (x.p && x.p.toType === 'creditor') g.toSup.push(M(x.amount) + ' → ' + d.creditor(x.p.creditorId).name);
     return acc;
   }, {})).sort((a, b) => b.total - a.total);
   const collected = payers.reduce((a, g) => a + g.total, 0);
@@ -61,9 +62,10 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty }) {
     { label: 'Outstanding credit', value: M(outs), note: D.customers.filter((c) => d.outstanding(c) > 0).length + ' accounts carrying a balance' },
   ];
   const oweSup = (D.suppliers || []).reduce((t, p) => t + Math.max(0, d.owed(p)), 0);
+  const oweCr = (D.creditors || []).reduce((t, c) => t + Math.max(0, d.crOwed(c)), 0);
   const minorKpis = [
     { label: 'On the bridge', value: String(D.onsite.length), note: D.onsite.length ? 'Awaiting weigh-out' : 'Platform clear' },
-    { label: 'We owe suppliers', value: M(oweSup), note: 'Soling, after payments' },
+    { label: 'We owe', value: M(oweSup + oweCr), note: 'Soling ' + M(oweSup) + ' · fuel & spares ' + M(oweCr) },
     { label: 'Salary due', value: M(duePay), note: 'Week ending ' + payWeek.slice(5) + ', after advances' },
     { label: 'Expense burn', value: M(burn), note: 'Sept to date' },
   ];
@@ -71,7 +73,7 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty }) {
     { label: 'Outstanding credit', value: M(outs), note: 'Across every account on terms' },
     { label: 'Salary due', value: M(duePay), note: 'Unpaid for the week ending ' + payWeek },
     { label: 'Expense burn', value: M(burn), note: 'September to date, net' },
-    { label: 'We owe suppliers', value: M(oweSup), note: (D.suppliers || []).filter((p) => d.owed(p) > 0.5).length + ' soling suppliers' },
+    { label: 'We owe', value: M(oweSup + oweCr), note: 'Soling ' + M(oweSup) + ' · fuel & spares ' + M(oweCr) },
   ];
 
   const owing = D.customers.filter((c) => d.outstanding(c) > 0);

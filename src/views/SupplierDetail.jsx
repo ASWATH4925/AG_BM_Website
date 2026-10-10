@@ -7,7 +7,7 @@ import { isoDate, M, N, T } from '../lib/format';
 import { METHOD_LABEL } from '../lib/payments';
 import { BackLink, Empty, Info, RangeBar, rangeStamps } from './PartyDetail';
 
-const TABS = ['Loads supplied', 'Payments made', 'Statement', 'Rates', 'Contact details'];
+const TABS = ['Loads supplied', 'Passes', 'Payments made', 'Statement', 'Rates', 'Contact details'];
 const TH = { cursor: 'default' };
 const R = { textAlign: 'right' };
 const methodName = (m) => METHOD_LABEL[m] || m;
@@ -15,7 +15,7 @@ const methodName = (m) => METHOD_LABEL[m] || m;
 // One soling supplier's account: what they brought, what has been paid to them, and what we still owe.
 export default function SupplierDetail({
   d, sup, tab, setTab, onBack, onEdit, onAddLoad, onEditLoad, onDeleteLoad, onPay, onDeletePay, onOpenParty,
-  onAddRate, onEndRate, onDeleteRate, onReport,
+  onAddRate, onEndRate, onDeleteRate, onReport, onAddPass, onEditPass, onDeletePass,
 }) {
   const [range, setRange] = useState({ fromDate: '', fromTime: '', toDate: '', toTime: '' });
   const { from, to } = rangeStamps(range);
@@ -48,13 +48,14 @@ export default function SupplierDetail({
             <button type="button" className="btn btn-secondary" onClick={() => onReport('statement', range)}>Generate report</button>
             <button type="button" className="btn btn-secondary" onClick={onAddRate}>{nowRate.rate ? 'Change rate' : 'Set rate'}</button>
             <button type="button" className="btn btn-secondary" onClick={onAddLoad}>Add soling load</button>
+            <button type="button" className="btn btn-secondary" onClick={() => onAddPass([])}>Add pass amount</button>
             <button type="button" className="btn btn-primary" onClick={onPay}>Pay supplier</button>
           </div>
         </div>
         <div className="ag-stagger ag-quad" style={{ padding: 'var(--space-6)' }}>
           <StatTile label={owe < -0.5 ? 'Paid ahead' : 'We owe'} value={M(Math.abs(owe))} note={nowRate.rate ? 'Rate today ' + M(nowRate.rate) + ' / t' : 'No rate set for today'} />
           <StatTile label="Loads supplied" value={String(allLoads.length)} note={T(sum(allLoads, d.net)) + ' t of boulders'} />
-          <StatTile label="Supplied value" value={M(d.supplied(sup))} note="Net tons × rate + extras" />
+          <StatTile label="Supplied value" value={M(d.supplied(sup) + d.passTotal(sup))} note={d.passTotal(sup) ? 'Loads ' + M(d.supplied(sup)) + ' + passes ' + M(d.passTotal(sup)) : 'Net tons × rate + extras'} />
           <StatTile label="Paid to them" value={M(d.paidToSupplier(sup))} note={byParties.length ? M(sum(byParties, (x) => x.p.amount)) + ' sent by parties' : 'Last payment ' + d.lastSupplierPay(sup)} />
         </div>
       </div>
@@ -79,7 +80,7 @@ export default function SupplierDetail({
                 <tr>
                   <th style={TH}>Date / time</th><th style={TH}>Serial</th><th style={TH}>Vehicle</th>
                   <th style={{ ...TH, ...R }}>Empty (kg)</th><th style={{ ...TH, ...R }}>Loaded (kg)</th><th style={{ ...TH, ...R }}>Net (t)</th>
-                  <th style={{ ...TH, ...R }}>Rate / t</th><th style={{ ...TH, ...R }}>Amount</th><th style={{ ...TH, ...R }}>Extra</th><th style={{ ...TH, ...R }}>We owe</th>
+                  <th style={{ ...TH, ...R }}>Rate / t</th><th style={{ ...TH, ...R }}>Amount</th><th style={{ ...TH, ...R }}>Extra</th><th style={{ ...TH, ...R }}>We owe</th><th style={TH}>Pass</th>
                   <th style={TH}>Remarks</th><th style={{ ...TH, ...R }}>Actions</th>
                 </tr>
               </thead>
@@ -98,6 +99,7 @@ export default function SupplierDetail({
                       <td className="ag-tabular" style={R}>{M(d.solAmount(u))}</td>
                       <td className="ag-tabular" style={R}>{+u.extra ? M(u.extra) : '—'}</td>
                       <td className="ag-tabular" style={{ ...R, fontWeight: 600 }}>{M(d.solValue(u))}</td>
+                      <td>{d.passesForLoad(u.id).length ? <Tag cls="ag-t-ok">{'Pass ' + d.passesForLoad(u.id).map((x) => x.date.slice(5)).join(', ')}</Tag> : <button type="button" className="btn btn-ghost" style={{ padding: '2px 6px' }} onClick={() => onAddPass([u.id])}>Add pass</button>}</td>
                       <td style={{ whiteSpace: 'normal', minWidth: 140, color: 'var(--color-neutral-700)' }}>{u.remarks || '—'}</td>
                       <td style={{ ...R, whiteSpace: 'nowrap' }}>
                         <button type="button" className="btn btn-ghost" onClick={() => onEditLoad(u)}>Edit</button>
@@ -116,7 +118,7 @@ export default function SupplierDetail({
                     <td className="ag-tabular" style={foot}>{M(sum(loads, d.solAmount))}</td>
                     <td className="ag-tabular" style={foot}>{M(sum(loads, (u) => +u.extra || 0))}</td>
                     <td className="ag-tabular" style={foot}>{M(sum(loads, d.solValue))}</td>
-                    <td colSpan={2} />
+                    <td colSpan={3} />
                   </tr>
                 </tfoot>
               )}
@@ -124,6 +126,44 @@ export default function SupplierDetail({
           </div>
           {loads.length === 0 && <Empty>No soling loads in this period.</Empty>}
         </div>
+      )}
+
+      {current === 'Passes' && (
+        <Panel
+          className="ag-rise"
+          title="Pass amounts"
+          sub="Money we pay this supplier for passes — added to what we owe them. A pass may name the loads it covers."
+          action={<button type="button" className="btn btn-primary" onClick={() => onAddPass([])}>Add pass amount</button>}
+        >
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table" style={{ width: '100%', minWidth: 760 }}>
+              <thead>
+                <tr><th style={TH}>Date / time</th><th style={{ ...TH, ...R }}>Amount</th><th style={TH}>For loads</th><th style={TH}>Remarks</th><th style={{ ...TH, ...R }}>Actions</th></tr>
+              </thead>
+              <tbody>
+                {d.passesOf(sup.id).slice().sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time)).map((x) => (
+                  <tr key={x.id}>
+                    <td className="ag-tabular">{x.date} {x.time}</td>
+                    <td className="ag-tabular" style={{ ...R, fontWeight: 700 }}>{M(x.amount)}</td>
+                    <td style={{ whiteSpace: 'normal', minWidth: 180 }}>{(x.loadIds || []).length ? x.loadIds.map((id) => { const u = allLoads.find((l) => l.id === id); return u ? (u.serial || u.vehicle) + ' (' + u.date.slice(5) + ')' : 'removed load'; }).join(', ') : <span style={{ color: 'var(--color-neutral-600)' }}>Not linked to loads</span>}</td>
+                    <td style={{ whiteSpace: 'normal', minWidth: 140, color: 'var(--color-neutral-700)' }}>{x.remarks || '—'}</td>
+                    <td style={{ ...R, whiteSpace: 'nowrap' }}>
+                      <button type="button" className="btn btn-ghost" onClick={() => onEditPass(x)}>Edit</button>
+                      <button type="button" className="btn btn-ghost" onClick={() => onDeletePass(x)}>Delete</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {d.passesOf(sup.id).length === 0 && <Empty>No pass amounts yet.</Empty>}
+          {d.passesOf(sup.id).length > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: 'var(--space-3) var(--space-6)', borderTop: '1px solid rgba(32,30,29,.10)', fontSize: 13 }}>
+              <span>{d.passesOf(sup.id).length} passes</span>
+              <strong className="ag-tabular">{M(d.passTotal(sup))}</strong>
+            </div>
+          )}
+        </Panel>
       )}
 
       {current === 'Payments made' && (
@@ -169,6 +209,34 @@ export default function SupplierDetail({
         </div>
       )}
 
+      {current === 'Payments made' && d.indentsFor(sup.id).length > 0 && (
+        <Panel className="ag-rise" style={{ marginTop: 'var(--space-6)' }} title="Fuel taken on our account (indents)" sub="Not deducted automatically — if this should come off what we owe them, record it with Pay supplier and a remark">
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table" style={{ width: '100%', minWidth: 720 }}>
+              <thead>
+                <tr><th style={TH}>Date / time</th><th style={TH}>Bunk</th><th style={TH}>Slip / indent</th><th style={TH}>Vehicle</th><th style={{ ...TH, ...R }}>Litres</th><th style={{ ...TH, ...R }}>Amount</th></tr>
+              </thead>
+              <tbody>
+                {d.indentsFor(sup.id).map((b) => (
+                  <tr key={b.id}>
+                    <td className="ag-tabular">{b.date} {b.time}</td>
+                    <td>{d.creditor(b.creditorId).name}</td>
+                    <td style={{ fontWeight: 600 }}>{b.billNo || '—'}</td>
+                    <td className="ag-tabular">{b.vehicle || '—'}</td>
+                    <td className="ag-tabular" style={R}>{+b.litres || '—'}</td>
+                    <td className="ag-tabular" style={{ ...R, fontWeight: 600 }}>{M(d.crBillValue(b))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: 'var(--space-3) var(--space-6)', borderTop: '1px solid rgba(32,30,29,.10)', fontSize: 13 }}>
+            <span>{d.indentsFor(sup.id).length} indents</span>
+            <strong className="ag-tabular">{M(d.indentsFor(sup.id).reduce((t, b) => t + d.crBillValue(b), 0))}</strong>
+          </div>
+        </Panel>
+      )}
+
       {current === 'Statement' && (
         <div className="ag-glass ag-rise">
           <RangeBar range={range} setRange={setRange}>{reportBtn('statement')}</RangeBar>
@@ -191,6 +259,7 @@ export default function SupplierDetail({
                   <tr key={i}>
                     <td className="ag-tabular">{r.ts}</td>
                     <td style={{ whiteSpace: 'normal' }}>
+                      {r.kind === 'pass' && <>Pass amount{(r.x.loadIds || []).length ? ' for ' + r.x.loadIds.map((id) => (allLoads.find((l) => l.id === id) || {}).serial || '?').join(', ') : ''}{r.x.remarks ? ' · ' + r.x.remarks : ''}</>}
                       {r.kind === 'load' && <>Soling <strong>{r.ref}</strong> · {r.u.vehicle} · {T(d.net(r.u))} t × {M(d.solRate(r.u).rate)}{+r.u.extra ? ' + extra ' + M(r.u.extra) : ''}</>}
                       {r.kind === 'pay' && <>Paid by {r.source === 'company' ? 'company' : r.by} · {methodName(r.method)}{r.p.ref ? ' · ' + r.p.ref : ''}</>}
                     </td>

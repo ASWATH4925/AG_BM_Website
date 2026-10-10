@@ -192,7 +192,7 @@ export default function PartyDetail({
                     <td style={{ fontWeight: 600 }}>{r.kind === 'receipt' ? 'Account receipt' : 'Load ' + r.ref}</td>
                     <td>{methodName(r.method)}</td>
                     <td className="ag-tabular" style={{ ...R, fontWeight: 600 }}>{M(r.credit)}</td>
-                    <td>{r.p ? paidToLabel(r.p, supplierName) : 'Company'}</td>
+                    <td>{r.p ? paidToLabel(r.p, supplierName, d.creditorName) : 'Company'}</td>
                     <td>{(r.p && r.p.ref) || '—'}</td>
                     <td style={{ whiteSpace: 'normal', minWidth: 160, color: 'var(--color-neutral-700)' }}>{(r.p && r.p.remarks) || '—'}</td>
                     <td style={{ ...R, whiteSpace: 'nowrap' }}>
@@ -238,8 +238,8 @@ export default function PartyDetail({
                     <td className="ag-tabular">{r.ts}</td>
                     <td style={{ whiteSpace: 'normal' }}>
                       {r.kind === 'load' && <>Load <strong>{r.ref}</strong> · {d.matLabel(r.o)} · {T(d.net(r.o))} t × {M(d.orderRate(r.o).rate)}{+r.o.gst ? ' + GST ' + M(r.o.gst) : ''}{+r.o.rent ? ' + rent ' + M(r.o.rent) : ''}</>}
-                      {r.kind === 'pay' && <>Paid on {r.ref} · {methodName(r.method)}{r.p ? ' → ' + paidToLabel(r.p, supplierName) : ''}</>}
-                      {r.kind === 'receipt' && <>Receipt · {methodName(r.method)}{r.p.ref ? ' · ' + r.p.ref : ''} → {paidToLabel(r.p, supplierName)}</>}
+                      {r.kind === 'pay' && <>Paid on {r.ref} · {methodName(r.method)}{r.p ? ' → ' + paidToLabel(r.p, supplierName, d.creditorName) : ''}</>}
+                      {r.kind === 'receipt' && <>Receipt · {methodName(r.method)}{r.p.ref ? ' · ' + r.p.ref : ''} → {paidToLabel(r.p, supplierName, d.creditorName)}</>}
                       {r.kind === 'round' && <>Round-off on {r.ref}</>}
                     </td>
                     <td className="ag-tabular" style={R}>{r.debit ? M(r.debit) : ''}</td>

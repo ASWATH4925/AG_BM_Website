@@ -16,6 +16,8 @@ import { MODS, moduleConfig } from './lib/modules';
 import { loadSaved, save as saveToBrowser } from './lib/storage';
 import CreditParties from './views/CreditParties';
 import Attendance from './views/Attendance';
+import CreditorDetail from './views/CreditorDetail';
+import Creditors from './views/Creditors';
 import Dashboard from './views/Dashboard';
 import DayBook from './views/DayBook';
 import Reports from './views/Reports';
@@ -28,12 +30,12 @@ import Profile from './views/Profile';
 import VoidedEntries from './views/VoidedEntries';
 import Weighbridge from './views/Weighbridge';
 
-const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'wage', 'tare', 'gross', 'days', 'ot', 'recovered', 'received', 'gst', 'rent', 'extra'];
+const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'wage', 'tare', 'gross', 'days', 'ot', 'recovered', 'received', 'gst', 'rent', 'extra', 'litres'];
 const FILTERS_CLEAR = { q: '', status: 'All', from: '', to: '', sortK: null };
 const RECEIPT_METHODS = ['Cash', 'UPI', 'Account', 'Cheque'].map((x) => ({ v: x, l: METHOD_LABEL[x] || x }));
 // Modules drawn by their own view instead of the generic list (their config still drives add/edit forms).
-const CUSTOM_LISTS = ['customers', 'suppliers', 'voids'];
-const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports', 'attendance', 'payroll'];
+const CUSTOM_LISTS = ['customers', 'suppliers', 'voids', 'bunks', 'vendors'];
+const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports', 'attendance', 'payroll', 'creditor'];
 const SIGNED_IN_AS = 'A. Gopalakrishnan';
 
 const isWide = () => window.innerWidth >= 900;
@@ -46,7 +48,7 @@ function initialState() {
   const saved = loadSaved();
   const db = saved ? upgradeDb(saved.db) : seedDb();
   return {
-    mod: 'dashboard', dashTab: 'Overview', now: new Date(), partyId: null, partyTab: 'Rates', supplierId: null, supplierTab: 'Loads supplied',
+    mod: 'dashboard', dashTab: 'Overview', now: new Date(), partyId: null, partyTab: 'Rates', supplierId: null, supplierTab: 'Loads supplied', creditorId: null, creditorTab: '',
     ...FILTERS_CLEAR, sortDir: 1,
     modal: null, form: {}, errors: {}, toast: null, wide: isWide(), payEdit: null,
     scale: IDLE_SCALE_KG, target: IDLE_SCALE_KG,
@@ -382,6 +384,41 @@ export default function App() {
   const openParty = (id) => set({ mod: 'party', partyId: id, partyTab: 'Loads taken', modal: null });
   const sup = s.mod === 'supplier' ? (s.db.suppliers || []).find((p) => p.id === s.supplierId) : null;
   const openSupplier = (id) => set({ mod: 'supplier', supplierId: id, supplierTab: 'Loads supplied', modal: null });
+  // ---- fuel bunks and spares companies ----
+  const cr = s.mod === 'creditor' ? (s.db.creditors || []).find((c) => c.id === s.creditorId) : null;
+  const openCreditor = (id) => set({ mod: 'creditor', creditorId: id, creditorTab: '', modal: null });
+  const openCrBill = (c) => {
+    const bunk = c.kind === 'bunk';
+    const cfgB = cfgOf(bunk ? 'fuelBills' : 'spareBills');
+    const f = {};
+    cfgB.fields.forEach((x) => { f[x.k] = x.type === 'date' ? isoDate() : x.type === 'time' ? hhmm() : ''; });
+    f.creditorId = c.id;
+    if (bunk) {
+      f.forType = 'own';
+      // Start from the price on the bunk's latest fill; staff change it when the price changes.
+      const last = d.crBillsOf(c.id).filter((b) => +b.rate > 0).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))[0];
+      f.rate = last ? last.rate : '';
+    }
+    set({ modal: { kind: 'form', cfgMod: bunk ? 'fuelBills' : 'spareBills', title: (bunk ? 'Fuel taken — ' : 'Purchase bill — ') + c.name, kicker: bunk ? 'Fuel on credit' : 'Bought on credit', confirmLabel: 'Save' }, form: f, errors: {} });
+  };
+  const openCrPay = (c) => set({
+    modal: { kind: 'crPay', id: c.id, title: 'Pay ' + c.name, kicker: c.kind === 'bunk' ? 'Payment to fuel bunk' : 'Payment to spares company', confirmLabel: 'Save payment' },
+    form: { amount: '', method: 'Cash', date: isoDate(), time: hhmm(), ref: '', remarks: '' }, errors: {},
+  });
+  const postCrPay = () => {
+    const f = s.form;
+    const c = d.creditor(s.modal.id);
+    const amt = round2(f.amount);
+    const errs = {};
+    if (!(amt > 0)) errs.amount = 'Enter an amount greater than zero.';
+    if (!f.date) errs.date = 'Required.';
+    if (Object.keys(errs).length) { set({ errors: errs }); return; }
+    const rec = { id: 'KP' + Date.now(), creditorId: c.id, date: f.date, time: f.time || hhmm(), method: f.method, amount: amt, ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: SIGNED_IN_AS };
+    set((st) => ({ db: { ...st.db, crPayments: (st.db.crPayments || []).concat([rec]) }, modal: null }));
+    const left = d.crOwed(c) - amt;
+    toast(M(amt) + ' paid to ' + c.name + '. ' + (left < -0.5 ? M(-left) + ' paid ahead.' : 'Still owed ' + M(Math.max(0, left)) + '.'));
+  };
+
   const supplierOfParty = (custId) => (s.db.suppliers || []).find((p) => p.linkedCustId === custId);
 
   // Manual load entered from a credit party's account; saving opens the payment dialog.
@@ -562,6 +599,34 @@ export default function App() {
     toast(M(amt) + ' paid to ' + p.name + ' by ' + METHOD_LABEL[f.method] + '. ' + (left < -0.5 ? M(-left) + ' paid ahead.' : 'Still owed ' + M(Math.max(0, left)) + '.'));
   };
 
+  // Pass amount for a soling supplier: an amount, optionally tied to the loads it covers; added to what we owe.
+  const openPass = (supplierId, loadIds = [], existing = null) => set({
+    modal: {
+      kind: 'solPass', supplierId, id: existing ? existing.id : '', confirmLabel: existing ? 'Save changes' : 'Add to what we owe',
+      title: (existing ? 'Edit pass amount — ' : 'Add pass amount — ') + d.supplier(supplierId).name, kicker: 'Soling pass',
+    },
+    form: existing
+      ? { amount: existing.amount, date: existing.date, time: existing.time || '', loadIds: existing.loadIds || [], remarks: existing.remarks || '' }
+      : { amount: '', date: isoDate(), time: hhmm(), loadIds, remarks: '' },
+    errors: {},
+  });
+  const savePass = () => {
+    const m = s.modal;
+    const f = s.form;
+    const amt = round2(f.amount);
+    const errs = {};
+    if (!(amt > 0)) errs.amount = 'Enter the pass amount.';
+    if (!f.date) errs.date = 'Required.';
+    if (Object.keys(errs).length) { set({ errors: errs }); return; }
+    const rec = { supplierId: m.supplierId, amount: amt, date: f.date, time: f.time || hhmm(), loadIds: f.loadIds || [], remarks: String(f.remarks || '').trim() };
+    set((st) => {
+      const list = st.db.solPasses || [];
+      const next = m.id ? list.map((x) => (x.id === m.id ? { ...x, ...rec } : x)) : list.concat([{ id: 'PS' + Date.now(), ...rec, by: SIGNED_IN_AS }]);
+      return { db: { ...st.db, solPasses: next }, modal: null };
+    });
+    toast('Pass amount ' + M(amt) + (rec.loadIds.length ? ' for ' + rec.loadIds.length + ' load(s)' : '') + ' ' + (m.id ? 'updated' : 'added to what we owe ' + d.supplier(m.supplierId).name) + '.');
+  };
+
   const openSolRate = (supplierId) => set({
     modal: { kind: 'solRate', id: supplierId, title: 'New soling rate — ' + d.supplier(supplierId).name, kicker: 'Rate per ton', confirmLabel: 'Save rate' },
     form: { rate: '', from: isoDate(), to: '', remarks: '' }, errors: {},
@@ -626,6 +691,15 @@ export default function App() {
         records: { suppliers: [row], purchases: loads, supPayments: (D.supPayments || []).filter((p) => p.supplierId === row.id), solRates: (D.solRates || []).filter((r) => r.supplierId === row.id) },
       };
     }
+    if (key === 'solPasses') return { kind: 'Pass amount', label: d.supplier(row.supplierId).name + ' · ' + row.date + ((row.loadIds || []).length ? ' · ' + row.loadIds.length + ' load(s)' : ''), amount: +row.amount || 0, records: { solPasses: [row] } };
+    if (key === 'creditors') {
+      return {
+        kind: row.kind === 'bunk' ? 'Fuel bunk' : 'Spares company', label: row.name + ' with ' + (D.crBills || []).filter((b) => b.creditorId === row.id).length + ' bill(s)', amount: d.crOwed(row),
+        records: { creditors: [row], crBills: (D.crBills || []).filter((b) => b.creditorId === row.id), crPayments: (D.crPayments || []).filter((p) => p.creditorId === row.id) },
+      };
+    }
+    if (key === 'crBills') return { kind: d.creditor(row.creditorId).kind === 'bunk' ? 'Fuel entry' : 'Purchase bill', label: d.creditor(row.creditorId).name + ' · ' + (row.billNo || row.items || row.vehicle || '') + ' · ' + row.date, amount: d.crBillValue(row), records: { crBills: [row] } };
+    if (key === 'crPayments') return { kind: 'Payment to ' + (d.creditor(row.creditorId).kind === 'bunk' ? 'bunk' : 'spares company'), label: d.creditor(row.creditorId).name + ' · ' + METHOD_LABEL[row.method] + ' · ' + row.date, amount: row.amount, records: { crPayments: [row] } };
     if (key === 'advances') return { kind: 'Advance', label: P.emp(row.empId).name + ' · ' + row.date + (row.remarks ? ' · ' + row.remarks : ''), amount: +row.amount || 0, records: { advances: [row] } };
     if (key === 'payroll') return { kind: 'Salary payment', label: P.emp(row.empId).name + ' · week ending ' + row.weekEnd, amount: +row.net || 0, records: { payroll: [row] } };
     if (key === 'expenses') return { kind: row.type === 'Credit' ? 'Other income' : 'Expense', label: (row.head === 'Other' && row.headOther ? row.headOther : row.head) + ' · ' + (row.party || '') + ' · ' + row.date, amount: +row.amount || 0, records: { expenses: [row] } };
@@ -650,7 +724,7 @@ export default function App() {
       const db = { ...st.db, voided: [entry].concat(st.db.voided || []) };
       Object.entries(entry.records).forEach(([k, items]) => { db[k] = drop(st.db[k] || [], items, k === 'staging' ? 'key' : 'id'); });
       if (key === 'customers') db.suppliers = st.db.suppliers.map((p) => (p.linkedCustId === row.id ? { ...p, linkedCustId: '' } : p));
-      return { db, modal: null, ...(key === 'customers' && st.mod === 'party' ? { mod: 'customers' } : key === 'suppliers' && st.mod === 'supplier' ? { mod: 'suppliers' } : {}) };
+      return { db, modal: null, ...(key === 'customers' && st.mod === 'party' ? { mod: 'customers' } : key === 'suppliers' && st.mod === 'supplier' ? { mod: 'suppliers' } : key === 'creditors' && st.mod === 'creditor' ? { mod: row.kind === 'bunk' ? 'bunks' : 'vendors' } : {}) };
     });
     toast(entry.kind + ' moved to Voided entries.');
   };
@@ -672,8 +746,8 @@ export default function App() {
   // who: { supplierId } for one soling supplier, { suppliers: true } for all of them; otherwise a party (custId) or all parties.
   const openReport = (custId, type, range = {}, who = {}) => set({
     modal: {
-      kind: 'report', custId, supplierId: who.supplierId || '', allSuppliers: !!who.suppliers, kicker: 'PDF report', confirmLabel: 'Download PDF',
-      title: custId ? 'Generate report — ' + d.cust(custId).name : who.supplierId ? 'Generate report — ' + d.supplier(who.supplierId).name : who.suppliers ? 'All soling suppliers report' : 'All credit parties report',
+      kind: 'report', custId, supplierId: who.supplierId || '', allSuppliers: !!who.suppliers, creditorId: who.creditorId || '', listReport: who.list || '', kicker: 'PDF report', confirmLabel: 'Download PDF',
+      title: who.creditorId ? 'Generate report — ' + d.creditor(who.creditorId).name : who.list ? (who.list === 'fuel' ? 'Fuel bunks report' : 'Spares & purchases report') : custId ? 'Generate report — ' + d.cust(custId).name : who.supplierId ? 'Generate report — ' + d.supplier(who.supplierId).name : who.suppliers ? 'All soling suppliers report' : 'All credit parties report',
     },
     form: { type: type || 'statement', copy: 'party', fromDate: range.fromDate || '', fromTime: range.fromTime || '', toDate: range.toDate || '', toTime: range.toTime || '' },
     errors: {},
@@ -686,6 +760,13 @@ export default function App() {
     if (from && to && to < from) { set({ errors: { toDate: 'The end is before the start.' } }); return; }
     const m = s.modal;
     const R = await import('./lib/report');
+    if (m.creditorId || m.listReport) {
+      const X = await import('./lib/exports');
+      await X.reportPdf(m.creditorId ? X.buildCreditorReport(d, d.creditor(m.creditorId), f.type, from, to) : X.buildReport(m.listReport, d, from.slice(0, 10), to.slice(0, 10)));
+      set({ modal: null });
+      toast('Report downloaded.');
+      return;
+    }
     if (m.custId) await R.partyReport({ d, party: d.cust(m.custId), type: f.type, from, to, copy: f.copy });
     else if (m.supplierId) await R.supplierReport({ d, sup: d.supplier(m.supplierId), type: f.type, from, to });
     else if (m.allSuppliers) await R.allSuppliersReport({ d, from, to });
@@ -786,13 +867,15 @@ export default function App() {
     if (!f.date) errs.date = 'Required.';
     if (Object.keys(errs).length) { set({ errors: errs }); return; }
     const toSupplier = f.to.startsWith('S:');
+    const toCreditor = f.to.startsWith('C:');
     const rec = {
       id: 'YR' + Date.now(), date: f.date, time: f.time || hhmm(), ticketId: '', custId: c.id, walkIn: '',
-      method: f.method, amount: amt, toType: toSupplier ? 'supplier' : f.to, supplierId: toSupplier ? f.to.slice(2) : '',
+      method: f.method, amount: amt, toType: toSupplier ? 'supplier' : toCreditor ? 'creditor' : f.to,
+      supplierId: toSupplier ? f.to.slice(2) : '', creditorId: toCreditor ? f.to.slice(2) : '',
       toName: f.to === 'other' ? String(f.toName).trim() : '', ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: SIGNED_IN_AS,
     };
     set((st) => ({ db: { ...st.db, payments: st.db.payments.concat([rec]) }, modal: null }));
-    toast(M(amt) + ' received from ' + c.name + ' by ' + METHOD_LABEL[f.method] + ' → ' + paidToLabel(rec, (id) => d.supplier(id).name) + '.');
+    toast(M(amt) + ' received from ' + c.name + ' by ' + METHOD_LABEL[f.method] + ' → ' + paidToLabel(rec, (id) => d.supplier(id).name, d.creditorName) + '.');
   };
 
   const save = () => {
@@ -817,6 +900,8 @@ export default function App() {
       if (newOrder) return { db: { ...st.db, orders: [newOrder].concat(list) }, modal: null, seq: st.seq + 1 };
       const extra = c.key === 'customers' ? { code: nextCode(list, 'CP-', 3), received: 0, last: '—' }
         : c.key === 'suppliers' ? { code: nextCode(list, 'SP-', 2) }
+          : c.key === 'creditors' ? { code: nextCode(list.filter((x) => x.kind === c.defaults.kind), c.defaults.kind === 'bunk' ? 'FB-' : 'SC-', 2), ...c.defaults }
+          : c.key === 'crBills' ? { by: SIGNED_IN_AS }
           : c.key === 'purchases' ? { batchId: '', by: SIGNED_IN_AS }
           : c.key === 'materials' ? { code: 'MT-' + String(list.length + 1).padStart(2, '0'), unit: 'Ton' }
             : c.key === 'employees' ? { code: 'EM-' + String(list.length + 1).padStart(2, '0') } : {};
@@ -832,6 +917,7 @@ export default function App() {
       openTicketPay(editedOrder);
       return;
     }
+    if (c.key === 'crBills') { toast((m.cfgMod === 'fuelBills' ? 'Fuel entry ' : 'Purchase bill ') + (m.id ? 'updated' : 'saved') + ' for ' + d.creditor(rec.creditorId).name + '.'); return; }
     if (c.key === 'purchases') { toast('Soling load ' + (m.id ? 'updated' : 'saved') + ' for ' + d.supplier(rec.supplierId).name + '.'); return; }
     toast(m.id ? (rec.name || rec.ticket || 'Record') + ' updated.' : (rec.name || (newOrder && newOrder.ticket) || 'Record') + ' created.');
   };
@@ -854,6 +940,7 @@ export default function App() {
     };
     const toOptions = [{ v: 'company', l: 'Company account' }]
       .concat(s.db.suppliers.filter((p) => p.status !== 'Inactive').map((p) => ({ v: 'S:' + p.id, l: p.name + ' (soling supplier)' })))
+      .concat((s.db.creditors || []).filter((c) => c.status !== 'Inactive').map((c) => ({ v: 'C:' + c.id, l: c.name + (c.kind === 'bunk' ? ' (fuel bunk)' : ' (spares)') })))
       .concat([{ v: 'other', l: 'Someone else…' }]);
     const range = (from) => [
       { k: from ? 'fromDate' : 'toDate', label: from ? 'From date' : 'To date', type: 'date', hint: from ? 'Blank = from the first entry' : 'Blank = up to now' },
@@ -897,6 +984,25 @@ export default function App() {
           { k: 'cashStart', label: 'Cash in hand (₹)', type: 'number' },
           { k: 'bankStart', label: 'Bank & UPI balance (₹)', type: 'number' },
         ]
+        : m.kind === 'solPass' ? [
+          { k: 'amount', label: 'Pass amount (₹)', type: 'number' },
+          { k: 'date', label: 'Date', type: 'date' },
+          { k: 'time', label: 'Time', type: 'time' },
+          { k: 'remarks', label: 'Remarks', hint: 'Optional' },
+          {
+            k: 'loadIds', label: 'For which loads (optional — tick any, or skip)', type: 'checklist', span: 'span 2', empty: 'No soling loads for this supplier yet',
+            options: d.solLoadsOf(m.supplierId).slice().sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
+              .map((u) => ({ v: u.id, l: u.date + ' · ' + (u.serial || 'Load') + ' · ' + u.vehicle + ' · ' + T(d.net(u)) + ' t' + (d.passesForLoad(u.id).some((x) => x.id !== m.id) ? ' · already has a pass' : '') })),
+          },
+        ]
+        : m.kind === 'crPay' ? [
+          { k: 'amount', label: 'Amount paid (₹)', type: 'number', hint: (() => { const o = d.crOwed(d.creditor(m.id)); return o < -0.5 ? 'Already paid ahead ' + M(-o) : 'We owe ' + M(Math.max(0, o)); })() },
+          { k: 'method', label: 'Method', type: 'select', options: RECEIPT_METHODS },
+          { k: 'date', label: 'Date', type: 'date' },
+          { k: 'time', label: 'Time', type: 'time' },
+          { k: 'ref', label: 'Reference / UTR / cheque no.', span: 'span 2' },
+          { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+        ]
         : m.kind === 'supPay' ? [
           { k: 'amount', label: 'Amount paid (₹)', type: 'number', hint: (() => { const o = d.owed(d.supplier(m.id)); return o < -0.5 ? 'Already paid ahead ' + M(-o) : 'We owe ' + M(Math.max(0, o)); })() },
           { k: 'method', label: 'Method', type: 'select', options: RECEIPT_METHODS },
@@ -913,6 +1019,7 @@ export default function App() {
         ]
         : m.kind === 'delete' ? [{ k: 'reason', label: 'Reason', span: 'span 2', hint: 'Optional — it moves to Voided entries and can be restored from there' }]
           : m.kind === 'report' ? [
+            ...(m.creditorId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (bills + payments)' }, { v: 'bills', l: d.creditor(m.creditorId).kind === 'bunk' ? 'Fuel taken' : 'Purchase bills' }, { v: 'payments', l: 'Payments made' }] }] : []),
             ...(m.supplierId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (loads + payments)' }, { v: 'loads', l: 'Soling loads supplied' }, { v: 'payments', l: 'Payments made' }] }] : []),
             ...(m.custId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (loads + payments)' }, { v: 'loads', l: 'Loads taken' }, { v: 'payments', l: 'Payment history' }] }] : []),
             ...(m.custId ? [{ k: 'copy', label: 'Copy for', type: 'select', options: [{ v: 'party', l: 'The party (hides who received payments)' }, { v: 'company', l: 'Company (shows who received payments)' }] }] : []),
@@ -963,7 +1070,7 @@ export default function App() {
           ];
         })() : null,
       onConfirm: {
-        delete: doDelete, void: doVoid, receipt: postReceipt, salary: saveSalary, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
+        delete: doDelete, void: doVoid, receipt: postReceipt, solPass: savePass, crPay: postCrPay, salary: saveSalary, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
         clearStaging: () => {
           const rows = s.db.staging;
           const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
@@ -981,7 +1088,8 @@ export default function App() {
   const meta = party
     ? { ...MODS.party, title: party.name, sub: [party.owner && 'Owner ' + party.owner, party.contact, party.address].filter(Boolean).join(' · ') || 'Credit party — add owner, contact and address with Edit details.' }
     : sup ? { ...MODS.supplier, title: sup.name, sub: [sup.owner && 'Owner ' + sup.owner, sup.contact, sup.upi && 'UPI ' + sup.upi].filter(Boolean).join(' · ') || 'Soling supplier — add owner, contact and UPI with Edit details.' }
-      : MODS[s.mod] || MODS.dashboard;
+      : cr ? { ...MODS.creditor, title: cr.name, sub: [cr.kind === 'bunk' ? 'Fuel bunk' : 'Spares company', cr.owner, cr.contact, cr.upi && 'UPI ' + cr.upi].filter(Boolean).join(' · ') }
+        : MODS[s.mod] || MODS.dashboard;
   const atStation = ['weighbridge', 'dashboard', 'import', 'voids', 'reports'].includes(s.mod);
   const onRates = s.mod === 'party' || s.mod === 'stdrates';
   const filters = { q: s.q, status: s.status, from: s.from, to: s.to, sortK: s.sortK, sortDir: s.sortDir };
@@ -990,7 +1098,7 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-body)', fontSize: 14, letterSpacing: '-0.011em' }}>
       <div style={s.wide ? { display: 'flex', alignItems: 'stretch', minHeight: '100vh' } : { display: 'block' }}>
-        <Sidebar wide={s.wide} mod={(MODS[s.mod] && MODS[s.mod].navAs) || s.mod} onsiteCount={s.db.onsite.length} go={go} />
+        <Sidebar wide={s.wide} mod={cr ? (cr.kind === 'bunk' ? 'bunks' : 'vendors') : (MODS[s.mod] && MODS[s.mod].navAs) || s.mod} onsiteCount={s.db.onsite.length} go={go} />
 
         <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', containerType: 'inline-size', containerName: 'shell' }}>
           <Header
@@ -1000,8 +1108,8 @@ export default function App() {
             tons={T(tonsToday) + ' t'}
             now={s.now}
             onWeighbridge={() => go('weighbridge')}
-            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : sup ? 'Add soling load' : s.mod === 'daybook' ? 'Add expense' : s.mod === 'attendance' || s.mod === 'payroll' ? 'Give advance' : s.mod === 'customers' ? 'New credit party' : s.mod === 'suppliers' ? 'New soling supplier' : 'New entry'}
-            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : sup ? () => openNewSoling(sup.id) : s.mod === 'daybook' ? openExpense : s.mod === 'attendance' || s.mod === 'payroll' ? () => openAdvance('', '') : openAdd}
+            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : sup ? 'Add soling load' : cr ? (cr.kind === 'bunk' ? 'Add fuel taken' : 'Add purchase bill') : s.mod === 'bunks' ? 'New fuel bunk' : s.mod === 'vendors' ? 'New spares company' : s.mod === 'daybook' ? 'Add expense' : s.mod === 'attendance' || s.mod === 'payroll' ? 'Give advance' : s.mod === 'customers' ? 'New credit party' : s.mod === 'suppliers' ? 'New soling supplier' : 'New entry'}
+            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : sup ? () => openNewSoling(sup.id) : cr ? () => openCrBill(cr) : s.mod === 'daybook' ? openExpense : s.mod === 'attendance' || s.mod === 'payroll' ? () => openAdvance('', '') : openAdd}
           />
           <main
             className="ag-main"
@@ -1091,6 +1199,41 @@ export default function App() {
               />
             )}
             {s.mod === 'reports' && <Reports d={d} onToast={toast} />}
+            {(s.mod === 'bunks' || s.mod === 'vendors') && (
+              <Creditors
+                key={s.mod}
+                d={d}
+                kind={s.mod === 'bunks' ? 'bunk' : 'vendor'}
+                onOpen={openCreditor}
+                onAdd={openAdd}
+                onReport={() => openReport('', 'statement', {}, { list: s.mod === 'bunks' ? 'fuel' : 'spares' })}
+              />
+            )}
+            {cr && (
+              <CreditorDetail
+                key={cr.id}
+                d={d}
+                cr={cr}
+                tab={s.creditorTab}
+                setTab={(t) => set({ creditorTab: t })}
+                onBack={() => go(cr.kind === 'bunk' ? 'bunks' : 'vendors')}
+                onEdit={() => openEdit(cr, cr.kind === 'bunk' ? 'bunks' : 'vendors')}
+                onAddBill={() => openCrBill(cr)}
+                onEditBill={(b) => openEdit(b, cr.kind === 'bunk' ? 'fuelBills' : 'spareBills')}
+                onDeleteBill={(b) => askDelete(b, 'crBills')}
+                onPay={() => openCrPay(cr)}
+                onDeletePay={(p) => askDelete(p, 'crPayments')}
+                onOpenParty={openParty}
+                onOpenSupplier={openSupplier}
+                onReport={(type, range) => openReport('', type, range, { creditorId: cr.id })}
+              />
+            )}
+            {s.mod === 'creditor' && !cr && (
+              <div className="ag-glass" style={{ padding: 'var(--space-6)' }}>
+                <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 16 }}>This account no longer exists</div>
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }} onClick={() => go('bunks')}>Fuel bunks</button>
+              </div>
+            )}
             {s.mod === 'suppliers' && (
               <SolingSuppliers d={d} onOpen={openSupplier} onAdd={openAdd} onReport={() => openReport('', 'statement', {}, { suppliers: true })} />
             )}
@@ -1113,6 +1256,9 @@ export default function App() {
                 onEndRate={(r) => askEndRate(r, 'solRates')}
                 onDeleteRate={(r) => askDelete(r, 'solRates')}
                 onReport={(type, range) => openReport('', type, range, { supplierId: sup.id })}
+                onAddPass={(loadIds) => openPass(sup.id, loadIds)}
+                onEditPass={(x) => openPass(sup.id, x.loadIds, x)}
+                onDeletePass={(x) => askDelete(x, 'solPasses')}
               />
             )}
             {s.mod === 'supplier' && !sup && (
@@ -1149,6 +1295,7 @@ export default function App() {
           walkIn={s.payEdit.walkIn}
           initial={s.payEdit.initial}
           suppliers={s.db.suppliers.filter((p) => p.status !== 'Inactive')}
+          creditors={(s.db.creditors || []).filter((c) => c.status !== 'Inactive')}
           onSave={savePay}
           onClose={() => set({ payEdit: null })}
         />

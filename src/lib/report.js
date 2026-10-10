@@ -83,7 +83,7 @@ function loadText(d, o) {
   return t;
 }
 
-const payTo = (d, p, company) => (company && p ? ' -> ' + paidToLabel(p, (id) => d.supplier(id).name) : '');
+const payTo = (d, p, company) => (company && p ? ' -> ' + paidToLabel(p, (id) => d.supplier(id).name, d.creditorName) : '');
 
 // type: 'statement' | 'loads' | 'payments'; copy: 'party' hides who received the money, 'company' shows it.
 export async function partyReport({ d, party, type, from, to, copy }) {
@@ -140,7 +140,7 @@ export async function partyReport({ d, party, type, from, to, copy }) {
       head: [head],
       body: pays.map((r) => [
         r.ts, r.kind === 'receipt' ? 'Account receipt' : 'Load ' + r.ref, METHOD_LABEL[r.method] || r.method, money(r.credit),
-        ...(company ? [r.p ? paidToLabel(r.p, (id) => d.supplier(id).name) : 'Company'] : []),
+        ...(company ? [r.p ? paidToLabel(r.p, (id) => d.supplier(id).name, d.creditorName) : 'Company'] : []),
         (r.p && r.p.ref) || '', (r.p && r.p.remarks) || '',
       ]),
       foot: [['Total', pays.length + ' payments', '', money(pays.reduce((s, r) => s + r.credit, 0)), ...(company ? [''] : []), '', '']],
@@ -188,7 +188,9 @@ export async function supplierReport({ d, sup, type, from, to }) {
   if (type === 'statement') {
     const body = [['', 'Opening balance', '', '', money(L.opening)]];
     L.rows.forEach((r) => {
-      const text = r.kind === 'load'
+      const text = r.kind === 'pass'
+        ? 'Pass amount' + ((r.x.loadIds || []).length ? ' for ' + r.x.loadIds.map((id) => (d.db.purchases.find((u) => u.id === id) || {}).serial || '?').join(', ') : '') + (r.x.remarks ? ' · ' + r.x.remarks : '')
+        : r.kind === 'load'
         ? 'Soling ' + r.ref + ' · ' + r.u.vehicle + ' · ' + tons(d.net(r.u)) + ' t x Rs.' + money(d.solRate(r.u).rate) + (+r.u.extra ? ' + extra ' + money(r.u.extra) : '')
         : 'Paid by ' + paidBy(r) + ' · ' + (METHOD_LABEL[r.method] || r.method) + (r.p.ref ? ' · ' + r.p.ref : '');
       body.push([r.ts, text, r.debit ? money(r.debit) : '', r.credit ? money(r.credit) : '', money(r.balance)]);

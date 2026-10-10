@@ -53,7 +53,21 @@ export default function Modal({ modal, fields, form, errors, setField, calcLines
                   const err = errors[f.k];
                   return (
                     <Field key={f.k} label={f.label} as={f.type === 'select' ? 'div' : 'label'} style={{ gridColumn: f.span ? '1 / -1' : 'auto', minWidth: 0 }}>
-                      {f.type === 'select' ? (
+                      {f.type === 'checklist' ? (
+                        <div style={{ border: '1px solid var(--color-neutral-300)', borderRadius: 'var(--ag-r-sm)', maxHeight: 220, overflowY: 'auto', padding: 6 }}>
+                          {(f.options || []).length === 0 && <div style={{ fontSize: 12.5, color: 'var(--color-neutral-600)', padding: 6 }}>{f.empty || 'Nothing to choose'}</div>}
+                          {(f.options || []).map((o) => {
+                            const list = Array.isArray(value) ? value : [];
+                            const on = list.includes(o.v);
+                            return (
+                              <label key={o.v} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '5px 6px', fontSize: 13, cursor: 'pointer' }}>
+                                <input type="checkbox" checked={on} onChange={() => setField(f.k, on ? list.filter((v) => v !== o.v) : list.concat([o.v]))} />
+                                <span>{o.l}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      ) : f.type === 'select' ? (
                         <Select label={f.label} value={value} options={f.options || []} onChange={(v) => setField(f.k, v)} />
                       ) : (
                         <input

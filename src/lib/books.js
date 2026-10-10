@@ -33,7 +33,7 @@ function movements(d) {
       what: t ? 'Load ' + t.ticket : 'Receipt on account', src: 'payments', rec: p,
     };
     if (!p.toType || p.toType === 'company') flows.push({ ...row, dir: 'in', kind: p.custId ? 'Credit party' : 'Walk-in' });
-    else direct.push({ ...row, to: p.toType === 'supplier' ? d.supplier(p.supplierId).name + ' (soling)' : (p.toName || 'Someone else') });
+    else direct.push({ ...row, to: p.toType === 'supplier' ? d.supplier(p.supplierId).name + ' (soling)' : p.toType === 'creditor' ? d.creditorName(p.creditorId) : (p.toName || 'Someone else') });
   });
 
   // Older loads marked paid without payment records count as paid on the load's date.
@@ -44,6 +44,11 @@ function movements(d) {
 
   (D.supPayments || []).forEach((p) => {
     flows.push({ date: p.date, time: p.time || '', who: d.supplier(p.supplierId).name, mode: p.method, amount: p.amount, ref: p.ref || '', remarks: p.remarks || '', what: 'Paid to soling supplier', dir: 'out', kind: 'Soling supplier', src: 'supPayments', rec: p });
+  });
+
+  (D.crPayments || []).forEach((p) => {
+    const c = d.creditor(p.creditorId);
+    flows.push({ date: p.date, time: p.time || '', who: c.name, mode: p.method, amount: p.amount, ref: p.ref || '', remarks: p.remarks || '', what: c.kind === 'bunk' ? 'Paid to fuel bunk' : 'Paid for spares', dir: 'out', kind: c.kind === 'bunk' ? 'Fuel bunk' : 'Spares', src: 'crPayments', rec: p });
   });
 
   const worker = (id) => ((D.employees || []).find((e) => e.id === id) || { name: '—' }).name;
@@ -120,8 +125,13 @@ export function solingSummary(d, from, to) {
     if (!paid) return;
     (bySup[p.id] || (bySup[p.id] = { name: p.name, loads: 0, tons: 0, value: 0, paid: 0 })).paid += paid;
   });
+  (d.db.solPasses || []).filter((x) => inRange(x.date, from, to)).forEach((x) => {
+    const g = bySup[x.supplierId] || (bySup[x.supplierId] = { name: d.supplier(x.supplierId).name, loads: 0, tons: 0, value: 0, paid: 0 });
+    g.value += +x.amount || 0;
+  });
+  const passes = (d.db.solPasses || []).filter((x) => inRange(x.date, from, to)).reduce((s, x) => s + (+x.amount || 0), 0);
   const list = Object.values(bySup).sort((a, b) => b.value - a.value);
-  return { loads, bySup: list, tons: loads.reduce((s, u) => s + d.net(u), 0), value: loads.reduce((s, u) => s + d.solValue(u), 0), paid: list.reduce((s, g) => s + g.paid, 0) };
+  return { passes, loads, bySup: list, tons: loads.reduce((s, u) => s + d.net(u), 0), value: loads.reduce((s, u) => s + d.solValue(u), 0) + passes, paid: list.reduce((s, g) => s + g.paid, 0) };
 }
 
 export function expenseSummary(d, from, to) {
@@ -140,11 +150,30 @@ export function wagesSummary(d, from, to) {
   return { list, earned: list.reduce((s, p) => s + (+p.earned || 0), 0), paid: list.reduce((s, p) => s + (+p.net || 0), 0) };
 }
 
-// Rough profit for a period: sales billed − soling bought − wages − expenses + other income.
+// Fuel and spares taken on credit, by bill date, for one kind ('bunk' | 'vendor').
+export function creditorSummary(d, kind, from, to) {
+  const accounts = (d.db.creditors || []).filter((c) => c.kind === kind);
+  const ids = new Set(accounts.map((c) => c.id));
+  const bills = (d.db.crBills || []).filter((b) => ids.has(b.creditorId) && inRange(b.date, from, to))
+    .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+  const by = accounts.map((c) => {
+    const own = bills.filter((b) => b.creditorId === c.id);
+    const paid = d.creditorPaysOf(c.id).filter((x) => inRange(x.p.date, from, to)).reduce((s, x) => s + x.p.amount, 0);
+    return { c, bills: own.length, litres: own.reduce((s, b) => s + (+b.litres || 0), 0), value: own.reduce((s, b) => s + d.crBillValue(b), 0), paid, owe: d.crOwed(c) };
+  }).filter((g) => g.bills || g.paid || g.owe);
+  return { bills, by, value: bills.reduce((s, b) => s + d.crBillValue(b), 0), litres: bills.reduce((s, b) => s + (+b.litres || 0), 0) };
+}
+
+// Rough profit for a period: sales billed − soling bought − wages − fuel − spares − expenses + other income.
 export function profitSummary(d, from, to) {
   const s = salesSummary(d, from, to);
   const so = solingSummary(d, from, to);
   const e = expenseSummary(d, from, to);
   const w = wagesSummary(d, from, to);
-  return { sales: s.value, soling: so.value, wages: w.earned, expenses: e.spentTotal, income: e.incomeTotal, net: s.value - so.value - w.earned - e.spentTotal + e.incomeTotal };
+  const fuel = creditorSummary(d, 'bunk', from, to).value;
+  const spares = creditorSummary(d, 'vendor', from, to).value;
+  return {
+    sales: s.value, soling: so.value, wages: w.earned, fuel, spares, expenses: e.spentTotal, income: e.incomeTotal,
+    net: s.value - so.value - w.earned - fuel - spares - e.spentTotal + e.incomeTotal,
+  };
 }

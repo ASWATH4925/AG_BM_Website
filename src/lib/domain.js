@@ -134,12 +134,17 @@ export function createDomain(db) {
       .filter((p) => p.toType === 'supplier' && p.supplierId === supplierId && !voidTickets.has(p.ticketId))
       .map((p) => ({ p, source: 'party', by: p.custId ? cust(p.custId).name : (p.walkIn || 'Walk-in') + ' (walk-in)' })));
   const supplied = (sup) => solLoadsOf(sup.id).reduce((s, u) => s + solValue(u), 0);
+  // Pass money we pay a soling supplier: added to what we owe; may name the loads it covers.
+  const passesOf = (supplierId) => (db.solPasses || []).filter((x) => x.supplierId === supplierId);
+  const passTotal = (sup) => passesOf(sup.id).reduce((s, x) => s + (+x.amount || 0), 0);
+  const passesForLoad = (loadId) => (db.solPasses || []).filter((x) => (x.loadIds || []).includes(loadId));
   const paidToSupplier = (sup) => supplierPaysOf(sup.id).reduce((s, x) => s + x.p.amount, 0);
   // Positive = we owe them; negative = we have paid ahead.
-  const owed = (sup) => supplied(sup) - paidToSupplier(sup);
+  const owed = (sup) => supplied(sup) + passTotal(sup) - paidToSupplier(sup);
   const lastSupplierPay = (sup) => supplierPaysOf(sup.id).map((x) => x.p.date).sort().pop() || '—';
   const supLedger = (supplierId, from = '', to = '') => {
     const rows = solLoadsOf(supplierId).map((u) => ({ ts: stamp(u), kind: 'load', u, ref: u.serial || 'Load', debit: solValue(u), credit: 0 }))
+      .concat(passesOf(supplierId).map((x) => ({ ts: stamp(x), kind: 'pass', x, ref: 'Pass', debit: +x.amount || 0, credit: 0 })))
       .concat(supplierPaysOf(supplierId).map((x) => ({ ts: stamp(x.p), kind: 'pay', p: x.p, source: x.source, by: x.by, method: x.p.method, debit: 0, credit: x.p.amount })));
     rows.sort((a, b) => a.ts.localeCompare(b.ts) || (a.kind === 'load' ? -1 : 1));
     let opening = 0;
@@ -154,10 +159,45 @@ export function createDomain(db) {
     return { opening, rows: inRange, debit: sum('debit'), credit: sum('credit'), closing: bal };
   };
 
+  // ---- fuel bunks and spares companies (we take on credit, pay later) ----
+  // A bill's value: the amount typed, else litres × price per litre (fuel); plus any GST.
+  const creditors = db.creditors || [];
+  const creditor = (id) => creditors.find((c) => c.id === id) || { id, name: '—', kind: '' };
+  const creditorName = (id) => { const c = creditor(id); return c.name + (c.kind === 'bunk' ? ' (fuel bunk)' : c.kind === 'vendor' ? ' (spares)' : ''); };
+  const crBillValue = (b) => (+b.amount > 0 ? +b.amount : (+b.litres || 0) * (+b.rate || 0)) + (+b.gst || 0);
+  const crBillsOf = (id) => (db.crBills || []).filter((b) => b.creditorId === id);
+  const creditorPaysOf = (id) => (db.crPayments || [])
+    .filter((p) => p.creditorId === id)
+    .map((p) => ({ p, source: 'company', by: 'Company' }))
+    .concat(payments
+      .filter((p) => p.toType === 'creditor' && p.creditorId === id && !voidTickets.has(p.ticketId))
+      .map((p) => ({ p, source: 'party', by: p.custId ? cust(p.custId).name : (p.walkIn || 'Walk-in') + ' (walk-in)' })));
+  const crBilled = (c) => crBillsOf(c.id).reduce((s, b) => s + crBillValue(b), 0);
+  const crPaid = (c) => creditorPaysOf(c.id).reduce((s, x) => s + x.p.amount, 0);
+  const crOwed = (c) => crBilled(c) - crPaid(c);
+  const crLedger = (id, from = '', to = '') => {
+    const rows = crBillsOf(id).map((b) => ({ ts: stamp(b), kind: 'bill', b, debit: crBillValue(b), credit: 0 }))
+      .concat(creditorPaysOf(id).map((x) => ({ ts: stamp(x.p), kind: 'pay', p: x.p, source: x.source, by: x.by, method: x.p.method, debit: 0, credit: x.p.amount })));
+    rows.sort((a, b) => a.ts.localeCompare(b.ts) || (a.kind === 'bill' ? -1 : 1));
+    let opening = 0;
+    const inRange = [];
+    rows.forEach((r) => {
+      if (from && r.ts < from) opening += r.debit - r.credit;
+      else if (!to || r.ts <= to) inRange.push(r);
+    });
+    let bal = opening;
+    inRange.forEach((r) => { bal += r.debit - r.credit; r.balance = bal; });
+    const sum = (k) => inRange.reduce((s, r) => s + r[k], 0);
+    return { opening, rows: inRange, debit: sum('debit'), credit: sum('credit'), closing: bal };
+  };
+  // Fuel a soling supplier took on our account (indent) — shown on their account, deducted by staff by hand.
+  const indentsFor = (supplierId) => (db.crBills || []).filter((b) => b.forType === 'soling' && b.forSupplierId === supplierId);
+
   return {
-    db, cust, supplier, mat, salesMaterials, rateFor, orderRate, matLabel,
+    db, cust, supplier, mat, salesMaterials,
+    creditor, creditorName, crBillValue, crBillsOf, creditorPaysOf, crBilled, crPaid, crOwed, crLedger, indentsFor, rateFor, orderRate, matLabel,
     net, amount, extras, billTotal, partyLabel, paymentsFor, receiptsOf, paidOn, onCredit, loadsOf, billed, received, outstanding, lastReceipt, ledger,
-    solRateFor, solRate, solAmount, solValue, solLoadsOf, supplierPaysOf, supplied, paidToSupplier, owed, lastSupplierPay, supLedger,
+    solRateFor, solRate, solAmount, solValue, solLoadsOf, supplierPaysOf, supplied, passesOf, passTotal, passesForLoad, paidToSupplier, owed, lastSupplierPay, supLedger,
   };
 }
 

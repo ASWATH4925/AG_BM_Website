@@ -19,6 +19,9 @@ export const MODS = {
   party: { label: 'Credit Parties', group: 'Masters', title: 'Credit party', sub: '', hidden: true, navAs: 'customers' },
   supplier: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling supplier', sub: '', hidden: true, navAs: 'suppliers' },
   stdrates: { label: 'Materials', group: 'Masters', title: 'Standard rates', sub: 'Rate per ton applied when a party has no rate of its own for that date.', hidden: true, navAs: 'materials' },
+  bunks: { label: 'Fuel Bunks', group: 'Finance', title: 'Fuel bunks', sub: 'Diesel taken on credit — for our vehicles, the tanker, and indents for soling suppliers — and what we owe each bunk.' },
+  vendors: { label: 'Spares & Purchases', group: 'Finance', title: 'Spares & purchases', sub: 'Spares and items bought on credit — bills, payments and what we owe each company.' },
+  creditor: { label: 'Fuel Bunks', group: 'Finance', title: 'Account', sub: '', hidden: true, navAs: 'bunks' },
   daybook: { label: 'Day Book', group: 'Finance', title: 'Day book', sub: 'Every rupee in and out — cash in hand and bank balance, day by day.' },
   reports: { label: 'Reports', group: 'Finance', title: 'Reports', sub: 'Sales, collections, soling, expenses and profit for any period — as PDF or Excel — and a full backup.' },
   payments: { label: 'Payments & Credit', group: 'Finance', title: 'Payments & credit', sub: 'Receipts, outstanding balances and ageing by account.' },
@@ -242,6 +245,73 @@ export function moduleConfig(mod, d) {
     ],
     foot: (rows) => 'Total outstanding: ' + M(rows.reduce((s, c) => s + d.outstanding(c), 0)),
   };
+
+  if (mod === 'bunks' || mod === 'vendors') {
+    const bunk = mod === 'bunks';
+    const what = bunk ? 'A fuel bunk' : 'A company';
+    return {
+      key: 'creditors', add: bunk ? 'New fuel bunk' : 'New spares company', defaults: { kind: bunk ? 'bunk' : 'vendor' },
+      cols: [{ k: 'name', label: 'Name' }],
+      fields: [
+        { k: 'name', label: bunk ? 'Bunk name' : 'Company name', req: 1, span: 'span 2' }, { k: 'owner', label: 'Owner / contact person' },
+        { k: 'contact', label: 'Contact number', placeholder: '98430 22417' },
+        { k: 'upi', label: 'UPI ID / number', hint: 'Where UPI payments are sent' },
+        { k: 'gstin', label: 'GSTIN' },
+        { k: 'address', label: 'Address', span: 'span 2' },
+        { k: 'status', label: 'Status', type: 'select', options: opts(['Active', 'Inactive']) },
+        { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+      ],
+      validate: (f, id) => ({ ...uniqueName((D.creditors || []).filter((c) => c.kind === (bunk ? 'bunk' : 'vendor')), f, id, what), ...checkContact(f) }),
+    };
+  }
+
+  if (mod === 'fuelBills' || mod === 'spareBills') {
+    const fuel = mod === 'fuelBills';
+    const accounts = (D.creditors || []).filter((c) => c.kind === (fuel ? 'bunk' : 'vendor') && c.status !== 'Inactive').map((c) => ({ v: c.id, l: c.name }));
+    return {
+      key: 'crBills', add: fuel ? 'Fuel taken' : 'New purchase bill',
+      cols: [{ k: 'date', label: 'Date' }],
+      fields: fuel ? [
+        { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'time', label: 'Time', type: 'time' },
+        { k: 'creditorId', label: 'Bunk', type: 'select', options: accounts, req: 1 },
+        { k: 'billNo', label: 'Slip / indent no.' },
+        { k: 'forType', label: 'Fuel for', type: 'select', options: [{ v: 'own', l: 'Our vehicle' }, { v: 'tanker', l: 'Our tanker' }, { v: 'soling', l: 'Soling supplier (indent on our account)' }, { v: 'other', l: 'Someone else' }] },
+        { k: 'vehicle', label: 'Vehicle number' },
+        { k: 'forSupplierId', label: 'Soling supplier', type: 'select', options: [{ v: '', l: '—' }].concat((D.suppliers || []).map((p) => ({ v: p.id, l: p.name }))), hint: 'Only for an indent — deduct it on their account yourself' },
+        { k: 'forName', label: 'Name (someone else)', hint: 'Only when fuel is for someone else' },
+        { k: 'litres', label: 'Litres', type: 'number' },
+        { k: 'rate', label: 'Price per litre (₹)', type: 'number' },
+        { k: 'amount', label: 'Amount (₹)', type: 'number', hint: 'Leave blank to use litres × price' },
+        { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+      ] : [
+        { k: 'date', label: 'Bill date', type: 'date', req: 1 }, { k: 'time', label: 'Time', type: 'time' },
+        { k: 'creditorId', label: 'Company', type: 'select', options: accounts, req: 1 },
+        { k: 'billNo', label: 'Bill no.' },
+        { k: 'items', label: 'What was bought', req: 1, span: 'span 2', placeholder: 'e.g. Jaw plate, 2 nos; conveyor belt 10 m' },
+        { k: 'amount', label: 'Amount (₹)', type: 'number', req: 1 },
+        { k: 'gst', label: 'GST amount (₹)', type: 'number', hint: 'Leave blank if none' },
+        { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+      ],
+      validate: (f) => {
+        const e = {};
+        if (fuel) {
+          const byLitres = +f.litres > 0 && +f.rate > 0;
+          if (!byLitres && !(+f.amount > 0)) e.amount = 'Enter litres and price per litre, or the amount.';
+          if ((+f.litres > 0) !== (+f.rate > 0) && !(+f.amount > 0)) e.rate = 'Enter both litres and price per litre.';
+          if (f.forType === 'soling' && !f.forSupplierId) e.forSupplierId = 'Choose the soling supplier.';
+          if (f.forType === 'other' && !String(f.forName || '').trim()) e.forName = 'Type who took the fuel.';
+        } else if (String(f.amount ?? '').trim() && !(+f.amount > 0)) e.amount = 'Enter the bill amount.';
+        if (String(f.gst ?? '').trim() && !(+f.gst >= 0)) e.gst = 'Enter an amount, or leave it blank.';
+        return e;
+      },
+      calc: (f) => {
+        const b = { litres: f.litres, rate: f.rate, amount: f.amount, gst: f.gst };
+        return fuel
+          ? [{ label: +f.amount > 0 ? 'Amount typed' : (+f.litres || 0).toFixed(2) + ' L × ₹' + (+f.rate || 0), value: M(d.crBillValue(b)) }]
+          : [{ label: 'Amount', value: M(+f.amount || 0) }, { label: 'GST', value: M(+f.gst || 0) }, { label: 'Bill total', value: M(d.crBillValue(b)) }];
+      },
+    };
+  }
 
   if (mod === 'expenses') return {
     key: 'expenses', add: 'New expense / income', dateKey: 'date', statusKey: '_t', statuses: ['All', 'Expense', 'Income'],
