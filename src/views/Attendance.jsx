@@ -118,7 +118,7 @@ function DaySheet({ d, P, date, onSave, onAdvance }) {
   );
 }
 
-export default function Attendance({ d, P, onSave, onAdvance }) {
+export default function Attendance({ d, P, onSave, onAdvance, onReport }) {
   const [date, setDate] = useState(TODAY);
   const marked = new Set((d.db.attendance || []).map((a) => a.date));
   return (
@@ -131,6 +131,7 @@ export default function Attendance({ d, P, onSave, onAdvance }) {
         </label>
         <button type="button" className="btn btn-secondary" onClick={() => setDate(addDays(date, 1))}>Next day →</button>
         {date !== TODAY && <button type="button" className="btn btn-ghost" onClick={() => setDate(TODAY)}>Today</button>}
+        <button type="button" className="btn btn-secondary" onClick={() => onReport(date)}>Attendance report</button>
         <span style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--color-neutral-700)' }}>
           {marked.has(date) ? 'This day is marked — you can edit it.' : 'Tap P, ½ or A for each worker, then save.'}
         </span>

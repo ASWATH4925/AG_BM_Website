@@ -17,7 +17,7 @@ function deltaOf(now, was) {
 
 const dayLabel = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
-export default function Dashboard({ d, tab, setTab, go, onOpenParty }) {
+export default function Dashboard({ d, tab, setTab, go, onOpenParty, onReport }) {
   const D = d.db;
   const [day, setDay] = useState(TODAY);
   const isToday = day === TODAY;
@@ -106,6 +106,7 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty }) {
             <input className="input" type="date" value={day} max={isoDate() > TODAY ? isoDate() : TODAY} onChange={(e) => setDay(e.target.value || TODAY)} style={{ width: 160, letterSpacing: 0, textTransform: 'none' }} aria-label="Dashboard date" />
           </label>
           {!isToday && <button type="button" className="btn btn-ghost" onClick={() => setDay(TODAY)}>Today</button>}
+          <button type="button" className="btn btn-secondary" onClick={() => onReport(day)}>Day report</button>
         </div>
       </div>
 

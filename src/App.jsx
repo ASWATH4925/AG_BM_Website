@@ -564,6 +564,14 @@ export default function App() {
     toast('Month-end electricity for ' + rec.month + ' saved.');
   };
 
+  // Reports opened from a page, with that page's dates filled in.
+  const monthRange = (ym) => {
+    const [y, mo] = ym.split('-').map(Number);
+    const last = new Date(y, mo, 0).getDate();
+    return { fromDate: ym + '-01', toDate: ym + '-' + String(last).padStart(2, '0') };
+  };
+  const openPageReport = (list, range) => openReport('', '', range, { list });
+
   // ---- start fresh: remove sample data before real use ----
   const openStartFresh = () => set({
     modal: {
@@ -792,10 +800,10 @@ export default function App() {
   // who: { supplierId } for one soling supplier, { suppliers: true } for all of them; otherwise a party (custId) or all parties.
   const openReport = (custId, type, range = {}, who = {}) => set({
     modal: {
-      kind: 'report', custId, supplierId: who.supplierId || '', allSuppliers: !!who.suppliers, creditorId: who.creditorId || '', listReport: who.list || '', kicker: 'PDF report', confirmLabel: 'Download PDF',
-      title: who.creditorId ? 'Generate report — ' + d.creditor(who.creditorId).name : who.list ? (who.list === 'fuel' ? 'Fuel bunks report' : 'Spares & purchases report') : custId ? 'Generate report — ' + d.cust(custId).name : who.supplierId ? 'Generate report — ' + d.supplier(who.supplierId).name : who.suppliers ? 'All soling suppliers report' : 'All credit parties report',
+      kind: 'report', custId, supplierId: who.supplierId || '', allSuppliers: !!who.suppliers, creditorId: who.creditorId || '', listReport: who.list || '', kicker: 'Report', confirmLabel: 'Download',
+      title: who.creditorId ? 'Generate report — ' + d.creditor(who.creditorId).name : who.list ? ({ fuel: 'Fuel bunks report', spares: 'Spares & purchases report', eb: 'Electricity (EB) report', attendance: 'Attendance & wages report', daily: 'Day report' }[who.list] || 'Report') : custId ? 'Generate report — ' + d.cust(custId).name : who.supplierId ? 'Generate report — ' + d.supplier(who.supplierId).name : who.suppliers ? 'All soling suppliers report' : 'All credit parties report',
     },
-    form: { type: type || 'statement', copy: 'party', fromDate: range.fromDate || '', fromTime: range.fromTime || '', toDate: range.toDate || '', toTime: range.toTime || '' },
+    form: { type: type || 'statement', copy: 'party', format: 'pdf', fromDate: range.fromDate || '', fromTime: range.fromTime || '', toDate: range.toDate || '', toTime: range.toTime || '' },
     errors: {},
   });
 
@@ -808,7 +816,9 @@ export default function App() {
     const R = await import('./lib/report');
     if (m.creditorId || m.listReport) {
       const X = await import('./lib/exports');
-      await X.reportPdf(m.creditorId ? X.buildCreditorReport(d, d.creditor(m.creditorId), f.type, from, to) : X.buildReport(m.listReport, d, from.slice(0, 10), to.slice(0, 10)));
+      if (m.listReport === 'daily' && !f.fromDate) { set({ errors: { fromDate: 'Choose the day.' } }); return; }
+      const rep = m.creditorId ? X.buildCreditorReport(d, d.creditor(m.creditorId), f.type, from, to) : X.buildReport(m.listReport, d, from.slice(0, 10), (m.listReport === 'daily' ? from : to).slice(0, 10));
+      if (f.format === 'xlsx') await X.reportExcel(rep); else await X.reportPdf(rep);
       set({ modal: null });
       toast('Report downloaded.');
       return;
@@ -1070,7 +1080,10 @@ export default function App() {
             ...(m.supplierId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (loads + payments)' }, { v: 'loads', l: 'Soling loads supplied' }, { v: 'payments', l: 'Payments made' }] }] : []),
             ...(m.custId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (loads + payments)' }, { v: 'loads', l: 'Loads taken' }, { v: 'payments', l: 'Payment history' }] }] : []),
             ...(m.custId ? [{ k: 'copy', label: 'Copy for', type: 'select', options: [{ v: 'party', l: 'The party (hides who received payments)' }, { v: 'company', l: 'Company (shows who received payments)' }] }] : []),
-            ...range(true), ...range(false),
+            ...(m.listReport === 'daily'
+              ? [{ k: 'fromDate', label: 'Day', type: 'date' }]
+              : [...range(true), ...range(false)]),
+            ...(m.listReport || m.creditorId ? [{ k: 'format', label: 'Download as', type: 'select', options: [{ v: 'pdf', l: 'PDF — to print or send' }, { v: 'xlsx', l: 'Excel — to work with the numbers' }] }] : []),
           ]
         : m.kind === 'rate' ? [
           { k: 'matId', label: 'Material', type: 'select', options: rateMats },
@@ -1162,7 +1175,7 @@ export default function App() {
             className="ag-main"
             style={{ padding: 'var(--space-6) var(--space-8) 72px', flex: '1 1 auto', minWidth: 0, containerType: 'inline-size', background: 'linear-gradient(180deg, #F8F4F4A9, #B0B0B0)' }}
           >
-            {s.mod === 'dashboard' && <Dashboard d={d} tab={s.dashTab} setTab={(t) => set({ dashTab: t })} go={go} onOpenParty={openParty} />}
+            {s.mod === 'dashboard' && <Dashboard d={d} tab={s.dashTab} setTab={(t) => set({ dashTab: t })} go={go} onOpenParty={openParty} onReport={(day) => openPageReport('daily', { fromDate: day, toDate: day })} />}
             {party && (
               <PartyDetail
                 d={d}
@@ -1223,7 +1236,7 @@ export default function App() {
             {s.mod === 'customers' && (
               <CreditParties d={d} onOpen={openParty} onAdd={openAdd} onReport={() => openReport('', 'statement')} />
             )}
-            {s.mod === 'attendance' && <Attendance d={d} P={P} onSave={saveAttendance} onAdvance={openAdvance} />}
+            {s.mod === 'attendance' && <Attendance d={d} P={P} onSave={saveAttendance} onAdvance={openAdvance} onReport={(date) => openPageReport('attendance', monthRange(date.slice(0, 7)))} />}
             {s.mod === 'payroll' && (
               <Salary
                 d={d}
@@ -1253,6 +1266,7 @@ export default function App() {
                 onDeleteReading={(r) => askDelete(r, 'ebReadings')}
                 onSaveBill={saveEbBill}
                 onDeleteBill={(b) => askDelete(b, 'ebBills')}
+                onReport={(month) => openPageReport('eb', monthRange(month))}
               />
             )}
             {(s.mod === 'bunks' || s.mod === 'vendors') && (

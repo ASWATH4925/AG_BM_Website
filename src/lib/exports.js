@@ -1,4 +1,5 @@
 import { TONS_PER_UNIT } from './format';
+import { dayCount, dayPay } from './people';
 import { creditorSummary, dayBook, ebSummary, salesByMode, expenseHead, expenseSummary, modeName, profitSummary, salesSummary, solingSummary } from './books';
 
 // Period reports, described once and written out as PDF or Excel.
@@ -14,6 +15,7 @@ export const REPORTS = [
   { v: 'fuel', l: 'Fuel bunks', sub: 'Fuel taken on credit — litres and amount by bunk, every fill, payments and what we owe' },
   { v: 'spares', l: 'Spares & purchases', sub: 'Purchase bills by company, payments and what we owe' },
   { v: 'eb', l: 'Electricity (EB)', sub: 'Daily units and PF, month-end bills, Thar plant share and our cost' },
+  { v: 'attendance', l: 'Attendance & wages', sub: 'Days present, half days and absent for each worker, wages earned, advances and salary paid' },
   { v: 'expenses', l: 'Expenses', sub: 'Every expense and other income, with totals by head' },
   { v: 'profit', l: 'Profit summary', sub: 'Sales − soling − wages − fuel − spares − electricity − expenses + income' },
 ];
@@ -127,6 +129,81 @@ export function buildReport(kind, d, from, to) {
           head: ['Date / time', 'Serial', 'Supplier', 'Vehicle', 'Tons', 'Rate / t', 'Extra', 'Value (Rs.)'],
           body: s.loads.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
             .map((u) => [u.date + ' ' + (u.time || ''), u.serial || '', d.supplier(u.supplierId).name, u.vehicle, d.net(u), d.solRate(u).rate, +u.extra || 0, d.solValue(u)]),
+        },
+      ],
+    };
+  }
+
+  if (kind === 'attendance') {
+    const D = d.db;
+    const inR = (x) => (!from || x >= from) && (!to || x <= to);
+    const att = (D.attendance || []).filter((a) => inR(a.date));
+    const rows = (D.employees || []).map((e) => {
+      const mine = att.filter((a) => a.empId === e.id);
+      const n = (st) => mine.filter((a) => a.status === st).length;
+      const adv = (D.advances || []).filter((a) => a.empId === e.id && inR(a.date)).reduce((s, a) => s + (+a.amount || 0), 0);
+      const paid = (D.payroll || []).filter((p) => p.empId === e.id && inR(p.date)).reduce((s, p) => s + (+p.net || 0), 0);
+      return [e.name, e.role || '', +e.wage || 0, n('Present'), n('Half day'), n('Absent'), mine.reduce((s, a) => s + dayCount(a), 0), mine.reduce((s, a) => s + dayPay(a), 0), adv, paid];
+    }).filter((r) => r[3] || r[4] || r[5] || r[8] || r[9]);
+    const tot = (i) => rows.reduce((s, r) => s + (+r[i] || 0), 0);
+    const days = [...new Set(att.map((a) => a.date))].length;
+    return {
+      title: 'Attendance & wages', file: file('attendance'), orientation: 'landscape', lines: lines.concat([days + ' day(s) marked in the period']),
+      sections: [{
+        fmt: ['', '', 'm', '', '', '', '', 'm', 'm', 'm'],
+        head: ['Worker', 'Work', 'Wage / day', 'Present', 'Half day', 'Absent', 'Days worked', 'Wages earned', 'Advances given', 'Salary paid'],
+        body: rows,
+        foot: ['Total', rows.length + ' workers', '', tot(3), tot(4), tot(5), tot(6), tot(7), tot(8), tot(9)],
+      }],
+    };
+  }
+
+  if (kind === 'daily') {
+    const day = from || to;
+    const s = salesSummary(d, day, day);
+    const t = salesByMode(d, day, day);
+    const b = dayBook(d, day, day);
+    const ebR = (d.db.ebReadings || []).find((r) => r.date === day);
+    const att = (d.db.attendance || []).filter((a) => a.date === day);
+    const n = (st) => att.filter((a) => a.status === st).length;
+    const paidBy = {};
+    (d.db.payments || []).filter((p) => p.custId && p.date === day).forEach((p) => { paidBy[p.custId] = (paidBy[p.custId] || 0) + p.amount; });
+    return {
+      title: 'Day report — ' + day, file: 'agbm-day-report-' + day, lines: ['1 unit = ' + TONS_PER_UNIT + ' tons'],
+      sections: [
+        {
+          heading: 'Materials sold', fmt: ['', '', 'u', 't', 'm'],
+          head: ['Material', 'Loads', 'Units', 'Tons', 'Value (Rs.)'],
+          body: s.byMat.map((m) => [m.label, m.loads, units(m.tons), m.tons, m.value]),
+          foot: ['Total', s.loads.length, units(s.tons), s.tons, s.value],
+        },
+        {
+          heading: 'How the sales were paid', fmt: ['', 'm'],
+          head: ['Paid by', 'Amount (Rs.)'],
+          body: [['Cash', t.cash], ['UPI to the company', t.upi], ['UPI sent to others', t.upiOthers], ['Bank / account', t.bank], ['Left on credit', t.credit], ['Round-off', t.roundOff]],
+          foot: ['Total sales', t.total],
+        },
+        {
+          heading: 'Paid by credit parties', fmt: ['', 'm', 'm'],
+          head: ['Party', 'Paid today (Rs.)', 'Still owes (Rs.)'],
+          body: Object.entries(paidBy).map(([id, a]) => [d.cust(id).name, a, d.outstanding(d.cust(id))]),
+        },
+        {
+          heading: 'Cash and bank', fmt: ['', 'm', 'm', 'm', 'm'],
+          head: ['', 'Opening', 'In', 'Out', 'Closing'],
+          body: [
+            ['Cash', b.opening.cash, b.totals.cash.in, b.totals.cash.out, b.closing.cash],
+            ['Bank & UPI', b.opening.bank, b.totals.bank.in, b.totals.bank.out, b.closing.bank],
+          ],
+        },
+        {
+          heading: 'Workers and electricity', fmt: ['', ''],
+          head: ['', ''],
+          body: [
+            ['Attendance', att.length ? n('Present') + ' present, ' + n('Half day') + ' half day, ' + n('Absent') + ' absent' : 'Not marked'],
+            ['Wages for the day', 'Rs. ' + r2(att.reduce((s2, a) => s2 + dayPay(a), 0)).toLocaleString('en-IN')],
+            ['EB units', ebR ? r2(ebR.units) + ' kWh' + (+ebR.pf ? ', PF ' + (+ebR.pf).toFixed(3) : '') : 'Not entered'],
+          ],
         },
       ],
     };

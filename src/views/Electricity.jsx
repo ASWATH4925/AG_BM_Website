@@ -16,7 +16,7 @@ const num = (v) => (+v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 
 const ERR = { display: 'block', fontSize: 11, color: 'var(--color-accent-700)', fontWeight: 600, marginTop: 3 };
 
 // EB (one meter): units used and power factor noted every day; at month end, the government (TNEB) and private power bills.
-export default function Electricity({ d, onSaveReading, onDeleteReading, onSaveBill, onDeleteBill }) {
+export default function Electricity({ d, onSaveReading, onDeleteReading, onSaveBill, onDeleteBill, onReport }) {
   const [month, setMonth] = useState(TODAY.slice(0, 7));
   const blank = { date: TODAY, units: '', pf: '', remarks: '' };
   const [form, setForm] = useState(blank);
@@ -93,6 +93,7 @@ export default function Electricity({ d, onSaveReading, onDeleteReading, onSaveB
         <button type="button" className="btn btn-secondary" onClick={() => setMonth(shiftMonth(month, -1))}>← Previous month</button>
         <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 17 }}>{monthName(month)}</div>
         <button type="button" className="btn btn-secondary" onClick={() => setMonth(shiftMonth(month, 1))}>Next month →</button>
+        <button type="button" className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={() => onReport(month)}>Generate report</button>
       </div>
 
       <div className="ag-stagger ag-quad" style={{ marginTop: 'var(--space-6)' }}>
