@@ -11,7 +11,7 @@ const TH = { cursor: 'default' };
 const R = { textAlign: 'right' };
 const methodName = (m) => METHOD_LABEL[m] || m;
 
-function BackLink({ label, onClick }) {
+export function BackLink({ label, onClick }) {
   return (
     <button type="button" className="btn btn-ghost" style={{ padding: '6px 8px', marginBottom: 'var(--space-4)', color: 'var(--color-neutral-700)' }} onClick={onClick}>
       ← {label}
@@ -19,7 +19,7 @@ function BackLink({ label, onClick }) {
   );
 }
 
-function Info({ label, value }) {
+export function Info({ label, value }) {
   return (
     <div style={{ minWidth: 0 }}>
       <div className="ag-label">{label}</div>
@@ -31,7 +31,7 @@ function Info({ label, value }) {
 }
 
 // From / to date and time; blank means open-ended.
-function RangeBar({ range, setRange, children }) {
+export function RangeBar({ range, setRange, children }) {
   const field = (k, type, label) => (
     <label className="field" style={{ flex: '0 1 150px', minWidth: 0 }}>
       <span className="ag-label ag-field-label">{label}</span>
@@ -55,7 +55,7 @@ export const rangeStamps = (r) => ({
   to: r.toDate ? r.toDate + ' ' + (r.toTime || '23:59') : '',
 });
 
-function Empty({ children }) {
+export function Empty({ children }) {
   return <div style={{ padding: 'var(--space-6)', borderTop: '1px solid rgba(32,30,29,.10)', fontSize: 13, color: 'var(--color-neutral-700)' }}>{children}</div>;
 }
 

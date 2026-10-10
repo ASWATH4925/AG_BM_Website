@@ -8,12 +8,14 @@ export const MODS = {
   weighbridge: { label: 'Weighbridge', group: 'Operations', title: 'Weighbridge station', sub: 'Capture tare on entry, gross on exit. Net weight and price compute themselves.' },
   import: { label: 'Register Import', group: 'Operations', title: 'Register import', sub: 'Load the weighbridge register, check each row and record how it was paid.' },
   orders: { label: 'Orders', group: 'Operations', title: 'Orders & transactions', sub: 'Every sale, priced at net tons × the rate per ton in force on its date, with how it was paid.' },
+  purchases: { label: 'Soling Loads', group: 'Operations', title: 'Soling loads', sub: 'Boulders bought from soling suppliers — net tons × the supplier rate on that date, plus any extra charges.' },
   voids: { label: 'Voided Entries', group: 'Operations', title: 'Voided entries', sub: 'Everything deleted or cancelled — who did it, when and why. Any entry can be restored.' },
   customers: { label: 'Credit Parties', group: 'Masters', title: 'Credit parties', sub: 'Everyone who takes material on credit — owner, address, contact and their own ton rates.' },
   suppliers: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling suppliers', sub: 'Boulder suppliers we buy from and owe money to. Kept apart from credit parties.' },
   materials: { label: 'Materials', group: 'Masters', title: 'Materials', sub: 'What we sell and buy, and the standard rate per ton for each period.' },
   // Detail screens, reached from the lists above (not shown in the sidebar).
   party: { label: 'Credit Parties', group: 'Masters', title: 'Credit party', sub: '', hidden: true, navAs: 'customers' },
+  supplier: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling supplier', sub: '', hidden: true, navAs: 'suppliers' },
   stdrates: { label: 'Materials', group: 'Masters', title: 'Standard rates', sub: 'Rate per ton applied when a party has no rate of its own for that date.', hidden: true, navAs: 'materials' },
   payments: { label: 'Payments & Credit', group: 'Finance', title: 'Payments & credit', sub: 'Receipts, outstanding balances and ageing by account.' },
   expenses: { label: 'Expenses', group: 'Finance', title: 'Expenses', sub: 'Credit and debit entries against the yard.' },
@@ -82,8 +84,56 @@ export function moduleConfig(mod, d) {
       { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
     ],
     validate: (f, id) => ({ ...uniqueName(D.suppliers, f, id, 'A soling supplier'), ...checkContact(f) }),
-    foot: (rows) => rows.length + ' soling supplier(s) · purchases and what we owe them come with the soling module',
+    foot: (rows) => 'We owe the filtered suppliers ' + M(rows.reduce((s, p) => s + Math.max(0, d.owed(p)), 0)),
   };
+
+  if (mod === 'purchases') {
+    const sp = () => (D.suppliers || []).map((p) => ({ v: p.id, l: p.name }));
+    return {
+      key: 'purchases', add: 'New soling load', dateKey: 'date',
+      statusKey: '_sp', statuses: ['All'].concat((D.suppliers || []).map((p) => p.name)),
+      cols: [
+        { k: 'serial', label: 'Serial' }, { k: 'date', label: 'Date' }, { k: 'time', label: 'Time' },
+        { k: '_sp', label: 'Supplier', get: (u) => d.supplier(u.supplierId).name }, { k: 'vehicle', label: 'Vehicle' },
+        { k: '_n', label: 'Net (t)', t: 'num2', get: (u) => d.net(u) }, { k: '_r', label: 'Rate / t', t: 'money', get: (u) => d.solRate(u).rate },
+        { k: '_x', label: 'Extra', t: 'money', get: (u) => +u.extra || 0 }, { k: '_v', label: 'Value', t: 'money', get: (u) => d.solValue(u) },
+        { k: 'remarks', label: 'Remarks' },
+      ],
+      rowAction: { label: 'Supplier', kind: 'supplier' },
+      fields: [
+        { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'time', label: 'Time', type: 'time' },
+        { k: 'supplierId', label: 'Soling supplier', type: 'select', options: sp(), req: 1 },
+        { k: 'serial', label: 'Register serial / ticket', placeholder: 'CR00001' },
+        { k: 'vehicle', label: 'Vehicle number', req: 1 },
+        { k: 'tare', label: 'Empty truck (kg)', type: 'number', req: 1, hint: 'Register "Gross" column' },
+        { k: 'gross', label: 'Loaded truck (kg)', type: 'number', req: 1, hint: 'Register "Net" column' },
+        { k: 'manualRate', label: 'Manual rate (₹ / ton)', type: 'number', hint: "Leave blank to use the supplier's rate for this date" },
+        { k: 'extra', label: 'Extra charges (₹)', type: 'number', hint: 'Rent, unloading — added to what we owe' },
+        { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+      ],
+      validate: (f) => {
+        const e = {};
+        if (+f.gross && +f.tare && +f.gross <= +f.tare) e.gross = 'The loaded weight must exceed the empty truck.';
+        const manual = String(f.manualRate ?? '').trim();
+        if (manual && !(+manual > 0)) e.manualRate = 'Enter a rate greater than zero, or leave it blank.';
+        else if (!manual && f.supplierId && f.date && !d.solRateFor(f.supplierId, f.date).rate) e.manualRate = 'No supplier rate covers this date — enter a manual rate or add a rate period.';
+        if (String(f.extra ?? '').trim() && !(+f.extra >= 0)) e.extra = 'Enter an amount, or leave it blank.';
+        return e;
+      },
+      calc: (f) => {
+        const u = { supplierId: f.supplierId, date: f.date, manualRate: f.manualRate, tare: +f.tare || 0, gross: +f.gross || 0, extra: f.extra };
+        const r = d.solRate(u);
+        return [
+          { label: 'Net boulders', value: T(d.net(u)) + ' t' },
+          { label: 'Rate (' + r.src + ')', value: M(r.rate) + ' / t' },
+          { label: 'Material value (net tons × rate)', value: M(d.solAmount(u)) },
+          { label: 'Extra charges', value: M(+f.extra || 0) },
+          { label: 'We owe for this load', value: M(d.solValue(u)) },
+        ];
+      },
+      foot: (rows) => rows.length + ' load(s) · ' + T(rows.reduce((s, u) => s + d.net(u), 0)) + ' t · value ' + M(rows.reduce((s, u) => s + d.solValue(u), 0)),
+    };
+  }
 
   if (mod === 'materials') return {
     key: 'materials', add: 'New material', statusKey: 'status', statuses: ['All', 'Active', 'Paused'],
@@ -318,6 +368,12 @@ export function listKpis(mod, rows, d) {
       { label: 'Outstanding', value: M(sum(rows, d.outstanding)), note: rows.filter((x) => d.outstanding(x) > 0).length + ' parties owe us' },
       { label: 'With their own rates', value: String(rows.filter((x) => D.rates.some((r) => r.custId === x.id)).length), note: 'Others pay the standard rate' },
       { label: 'Details missing', value: String(rows.filter((x) => !x.owner || !x.contact || !x.address).length), note: 'No owner, contact or address yet' },
+    ],
+    purchases: () => [
+      { label: 'Soling loads', value: String(rows.length), note: 'Filtered period' },
+      { label: 'Net boulders', value: T(sum(rows, d.net)) + ' t', note: 'Loaded − empty truck' },
+      { label: 'Value', value: M(sum(rows, d.solValue)), note: 'Including extra charges' },
+      { label: 'Without a rate', value: String(rows.filter((u) => !d.solRate(u).rate).length), note: 'Add a supplier rate period' },
     ],
     suppliers: () => [
       { label: 'Soling suppliers', value: String(rows.length), note: rows.filter((x) => x.status !== 'Active').length + ' inactive' },

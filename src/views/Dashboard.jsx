@@ -19,7 +19,6 @@ export default function Dashboard({ d, tab, setTab, go }) {
   const tons = todays.reduce((a, o) => a + d.net(o), 0);
   const rev = todays.reduce((a, o) => a + d.amount(o), 0);
   const outs = D.customers.reduce((a, c) => a + d.outstanding(c), 0);
-  const voids = D.orders.filter((o) => o.status === 'Void').length;
   const collected = (D.payments || []).filter((p) => p.date === TODAY).reduce((a, p) => a + p.amount, 0);
   const burn = D.expenses.filter((x) => x.type === 'Debit').reduce((a, x) => a + x.amount, 0)
     - D.expenses.filter((x) => x.type === 'Credit').reduce((a, x) => a + x.amount, 0);
@@ -35,8 +34,9 @@ export default function Dashboard({ d, tab, setTab, go }) {
     { label: 'Outstanding credit', value: M(outs), note: D.customers.filter((c) => d.outstanding(c) > 0).length + ' accounts carrying a balance' },
     { label: 'On the bridge', value: String(D.onsite.length), note: D.onsite.length ? 'Awaiting weigh-out' : 'Platform clear', ...(D.onsite.length ? { delta: 'Live', deltaTag: 'ag-t-ok' } : {}) },
   ];
+  const oweSup = (D.suppliers || []).reduce((t, p) => t + Math.max(0, d.owed(p)), 0);
   const minorKpis = [
-    { label: 'In transit', value: String(D.orders.filter((o) => o.status === 'In Transit').length), note: 'dispatched' },
+    { label: 'We owe suppliers', value: M(oweSup), note: 'Soling, after payments' },
     { label: 'Payroll due', value: M(duePay), note: 'net of advances' },
     { label: 'Expense burn', value: M(burn), note: 'Sept to date' },
     { label: 'Collected today', value: M(collected), note: 'Cash, UPI and account' },
@@ -45,7 +45,7 @@ export default function Dashboard({ d, tab, setTab, go }) {
     { label: 'Outstanding credit', value: M(outs), note: 'Across every account on terms' },
     { label: 'Payroll due', value: M(duePay), note: 'Aug cycle, net of advances' },
     { label: 'Expense burn', value: M(burn), note: 'September to date, net' },
-    { label: 'Voided loads', value: String(voids), note: 'Nothing billed on voids' },
+    { label: 'We owe suppliers', value: M(oweSup), note: (D.suppliers || []).filter((p) => d.owed(p) > 0.5).length + ' soling suppliers' },
   ];
 
   const owing = D.customers.filter((c) => d.outstanding(c) > 0);

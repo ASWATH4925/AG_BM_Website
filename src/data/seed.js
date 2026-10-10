@@ -141,28 +141,44 @@ const payments = walkIns.map((w, i) => ({
   toType: 'company', supplierId: '', toName: '', remarks: '', by: 'Murugan R',
 }));
 
-// Soling (boulder) loads from the 22 Aug register, kept exactly as recorded; priced and settled in the soling module.
+// Soling (boulder) loads from the 22 Aug register. Soling trucks come in loaded, so the register's
+// "Gross" column is the empty truck and its "Net" column the loaded weight: net = Net − Gross.
 const purchases = [
-  ['CR00001', '13:46', 'SKK KARTHI', 'TN28BJ1481', 0, 13110, 28680],
-  ['CR00007', '14:36', 'SARAVANABAVA', 'TN41BD1599', 0, 17300, 48860],
-  ['CR00010', '14:51', 'SR', 'TN85L2226', 0, 16860, 47570],
+  ['CR00001', '13:46', 'SKK KARTHI', 'TN28BJ1481', 13110, 28680],
+  ['CR00007', '14:36', 'SARAVANABAVA', 'TN41BD1599', 17300, 48860],
+  ['CR00010', '14:51', 'SR', 'TN85L2226', 16860, 47570],
 ].map((r, i) => ({
   id: 'U' + i, serial: r[0], date: '2026-08-22', time: r[1], supplierId: suppliers.find((p) => p.name === r[2]).id, regName: r[2],
-  vehicle: r[3], tare: r[4], gross: r[5], net: r[6], amount: 0, batchId: '', remarks: '',
+  vehicle: r[3], tare: r[4], gross: r[5], manualRate: '', extra: '', batchId: '', remarks: '', by: 'System',
 }));
+
+// Sample soling rates (₹ per ton) so the ledger has values — replace them with the agreed rates.
+const solRates = suppliers.map((p, i) => ({
+  id: 'SR' + i, supplierId: p.id, rate: [380, 400, 390][i], from: '2026-08-01', to: '', remarks: 'Sample rate — change to the agreed rate', by: 'System',
+}));
+
+// Soling loads stored before Module 3 kept the register columns as they were (tare 0, gross, net).
+const normalSoling = (u) => {
+  if (!('net' in u)) return u;
+  const { net, amount, ...rest } = u;
+  return { manualRate: '', extra: '', ...rest, tare: +u.gross || 0, gross: +net || 0 };
+};
 
 export const SEED_NEXT_TICKET = 24118;
 
 export function seedDb() {
   return JSON.parse(JSON.stringify({
-    customers: cust, suppliers, materials: mats, rates, orders: ord, payments, purchases, staging: [], imports: [], voided: [],
+    customers: cust, suppliers, materials: mats, rates, orders: ord, payments, purchases, solRates, supPayments: [], staging: [], imports: [], voided: [],
     employees: emp, attendance: att, advances: adv, payroll: pay, expenses: exp, onsite,
   }));
 }
 
 // Fills in collections added after a browser first saved its data, so older saves keep working.
 export function upgradeDb(saved) {
-  const db = { payments: [], purchases: [], staging: [], imports: [], suppliers: [], voided: [], ...saved };
+  const db = { payments: [], purchases: [], staging: [], imports: [], suppliers: [], voided: [], supPayments: [], ...saved };
+  if (!db.solRates) db.solRates = JSON.parse(JSON.stringify(solRates));
+  db.purchases = db.purchases.map(normalSoling);
+  db.voided = db.voided.map((e) => (e.records && e.records.purchases ? { ...e, records: { ...e.records, purchases: e.records.purchases.map(normalSoling) } } : e));
   // Older saves kept a party's receipts as one running total; turn it into a receipt record so it shows in payment history.
   const receipts = [];
   db.customers = db.customers.map((c) => {

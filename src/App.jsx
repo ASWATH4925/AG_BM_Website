@@ -7,6 +7,8 @@ import PaymentEditor from './components/PaymentEditor';
 import { SEED_NEXT_TICKET, seedDb, upgradeDb } from './data/seed';
 import { checkPay, defaultPay, emptyLine, fromRecords, isPaidMethod, METHOD_LABEL, paidToLabel, round2, toRecords } from './lib/payments';
 import { matchMaterial, normalName, parseRegister } from './lib/register';
+import SolingSuppliers from './views/SolingSuppliers';
+import SupplierDetail from './views/SupplierDetail';
 import RegisterImport, { rowBill, saleStatus, solingStatus } from './views/RegisterImport';
 import { createDomain, OTHER_MATERIAL, periodLabel, planRate } from './lib/domain';
 import { hhmm, isoDate, M, N, T } from './lib/format';
@@ -21,12 +23,12 @@ import Profile from './views/Profile';
 import VoidedEntries from './views/VoidedEntries';
 import Weighbridge from './views/Weighbridge';
 
-const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'salary', 'tare', 'gross', 'days', 'ot', 'recovered', 'received', 'gst', 'rent'];
+const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'salary', 'tare', 'gross', 'days', 'ot', 'recovered', 'received', 'gst', 'rent', 'extra'];
 const FILTERS_CLEAR = { q: '', status: 'All', from: '', to: '', sortK: null };
 const RECEIPT_METHODS = ['Cash', 'UPI', 'Account', 'Cheque'].map((x) => ({ v: x, l: METHOD_LABEL[x] || x }));
 // Modules drawn by their own view instead of the generic list (their config still drives add/edit forms).
-const CUSTOM_LISTS = ['customers', 'voids'];
-const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'stdrates', 'import'];
+const CUSTOM_LISTS = ['customers', 'suppliers', 'voids'];
+const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import'];
 const SIGNED_IN_AS = 'A. Gopalakrishnan';
 
 const isWide = () => window.innerWidth >= 900;
@@ -39,7 +41,7 @@ function initialState() {
   const saved = loadSaved();
   const db = saved ? upgradeDb(saved.db) : seedDb();
   return {
-    mod: 'dashboard', dashTab: 'Overview', now: new Date(), partyId: null, partyTab: 'Rates',
+    mod: 'dashboard', dashTab: 'Overview', now: new Date(), partyId: null, partyTab: 'Rates', supplierId: null, supplierTab: 'Loads supplied',
     ...FILTERS_CLEAR, sortDir: 1,
     modal: null, form: {}, errors: {}, toast: null, wide: isWide(), payEdit: null,
     scale: IDLE_SCALE_KG, target: IDLE_SCALE_KG,
@@ -350,7 +352,8 @@ export default function App() {
     if (!ready.length) return;
     const recs = ready.map((r, i) => ({
       id: 'U' + Date.now() + '-' + i, serial: r.serial, date: r.date, time: r.time, supplierId: r.supplierId, regName: r.name,
-      vehicle: r.vehicle, tare: r.tare, gross: r.gross, net: r.net, amount: r.amount, batchId: r.batchId, remarks: '',
+      // Soling trucks come in loaded: the register's Gross column is the empty truck, its Net column the loaded weight.
+      vehicle: r.vehicle, tare: r.gross, gross: r.net, manualRate: '', extra: '', batchId: r.batchId, remarks: '', by: SIGNED_IN_AS,
     }));
     const keys = new Set(ready.map((r) => r.key));
     set((st) => ({ db: { ...st.db, purchases: recs.concat(st.db.purchases), staging: st.db.staging.filter((r) => !keys.has(r.key)) } }));
@@ -371,6 +374,68 @@ export default function App() {
   const party = s.mod === 'party' ? s.db.customers.find((c) => c.id === s.partyId) : null;
 
   const openParty = (id) => set({ mod: 'party', partyId: id, partyTab: 'Loads taken', modal: null });
+  const sup = s.mod === 'supplier' ? (s.db.suppliers || []).find((p) => p.id === s.supplierId) : null;
+  const openSupplier = (id) => set({ mod: 'supplier', supplierId: id, supplierTab: 'Loads supplied', modal: null });
+  const supplierOfParty = (custId) => (s.db.suppliers || []).find((p) => p.linkedCustId === custId);
+
+  // ---- soling suppliers ----
+  const openNewSoling = (supplierId) => {
+    const c = cfgOf('purchases');
+    const f = {};
+    c.fields.forEach((x) => { f[x.k] = x.type === 'date' ? isoDate() : x.type === 'time' ? hhmm() : ''; });
+    f.supplierId = supplierId || ((s.db.suppliers || [])[0] || {}).id || '';
+    set({ modal: { kind: 'form', cfgMod: 'purchases', title: c.add, kicker: 'Soling load', confirmLabel: 'Save load' }, form: f, errors: {} });
+  };
+
+  const openSupPay = (p) => set({
+    modal: { kind: 'supPay', id: p.id, title: 'Pay ' + p.name, kicker: 'Payment to soling supplier', confirmLabel: 'Save payment' },
+    form: { amount: '', method: 'Cash', date: isoDate(), time: hhmm(), ref: '', remarks: '' }, errors: {},
+  });
+
+  const postSupPay = () => {
+    const f = s.form;
+    const p = d.supplier(s.modal.id);
+    const amt = round2(f.amount);
+    const errs = {};
+    if (!(amt > 0)) errs.amount = 'Enter an amount greater than zero.';
+    if (!f.date) errs.date = 'Required.';
+    if (Object.keys(errs).length) { set({ errors: errs }); return; }
+    const rec = {
+      id: 'Z' + Date.now(), date: f.date, time: f.time || hhmm(), supplierId: p.id, method: f.method, amount: amt,
+      ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: SIGNED_IN_AS,
+    };
+    set((st) => ({ db: { ...st.db, supPayments: (st.db.supPayments || []).concat([rec]) }, modal: null }));
+    const left = d.owed(p) - amt;
+    toast(M(amt) + ' paid to ' + p.name + ' by ' + METHOD_LABEL[f.method] + '. ' + (left < -0.5 ? M(-left) + ' paid ahead.' : 'Still owed ' + M(Math.max(0, left)) + '.'));
+  };
+
+  const openSolRate = (supplierId) => set({
+    modal: { kind: 'solRate', id: supplierId, title: 'New soling rate — ' + d.supplier(supplierId).name, kicker: 'Rate per ton', confirmLabel: 'Save rate' },
+    form: { rate: '', from: isoDate(), to: '', remarks: '' }, errors: {},
+  });
+
+  // Same period rules as party rates: an open-ended earlier period is closed the day before; other overlaps are refused.
+  const saveSolRate = () => {
+    const id = s.modal.id;
+    const f = s.form;
+    const own = (s.db.solRates || []).filter((r) => r.supplierId === id).map((r) => ({ ...r, custId: '', matId: 'SOL' }));
+    const rec = { custId: '', matId: 'SOL', rate: +f.rate, from: f.from, to: f.to || '' };
+    const plan = planRate(own, rec);
+    if (plan.errors) { set({ errors: plan.errors }); return; }
+    const card = { id: 'SR' + Date.now(), supplierId: id, rate: rec.rate, from: rec.from, to: rec.to, remarks: String(f.remarks || '').trim(), by: SIGNED_IN_AS };
+    set((st) => ({
+      db: {
+        ...st.db,
+        solRates: (st.db.solRates || []).map((r) => {
+          const c = plan.closes.find((x) => x.id === r.id);
+          return c ? { ...r, to: c.to } : r;
+        }).concat([card]),
+      },
+      modal: null,
+    }));
+    const closed = plan.closes.map((c) => ' The earlier ' + M(c.was.rate) + '/t period now ends ' + c.to + '.').join('');
+    toast(M(card.rate) + '/t from ' + card.from + ' saved for ' + d.supplier(id).name + '.' + closed);
+  };
 
   // Receipt on a party's account: how it was paid and who received the money (company, a soling supplier, or someone else).
   const openReceipt = (c) => set({
@@ -381,7 +446,7 @@ export default function App() {
   // ---- voided entries: nothing is deleted outright ----
   const KIND_NAME = {
     orders: 'Load', payments: 'Payment', customers: 'Credit party', suppliers: 'Soling supplier', materials: 'Material', rates: 'Rate period',
-    staging: 'Import row', expenses: 'Expense', employees: 'Employee', attendance: 'Attendance entry', advances: 'Advance', payroll: 'Payroll line',
+    staging: 'Import row', purchases: 'Soling load', supPayments: 'Supplier payment', solRates: 'Soling rate', expenses: 'Expense', employees: 'Employee', attendance: 'Attendance entry', advances: 'Advance', payroll: 'Payroll line',
   };
   const voidEntryFor = (key, row) => {
     const D = s.db;
@@ -398,6 +463,16 @@ export default function App() {
     if (key === 'materials') return { kind: 'Material', label: row.name, records: { materials: [row], rates: D.rates.filter((r) => r.matId === row.id) } };
     if (key === 'payments') return { kind: row.ticketId ? 'Payment' : 'Receipt', label: d.cust(row.custId).name + ' · ' + METHOD_LABEL[row.method] + ' · ' + row.date, amount: row.amount, records: { payments: [row] } };
     if (key === 'rates') return { kind: 'Rate period', label: rateTarget(row.custId) + ' · ' + d.mat(row.matId).name + ' · ' + M(row.rate) + '/t · ' + periodLabel(row), records: { rates: [row] } };
+    if (key === 'purchases') return { kind: 'Soling load', label: (row.serial || 'Load') + ' · ' + d.supplier(row.supplierId).name + ' · ' + row.vehicle + ' · ' + T(d.net(row)) + ' t', amount: d.solValue(row), records: { purchases: [row] } };
+    if (key === 'supPayments') return { kind: 'Supplier payment', label: d.supplier(row.supplierId).name + ' · ' + METHOD_LABEL[row.method] + ' · ' + row.date, amount: row.amount, records: { supPayments: [row] } };
+    if (key === 'solRates') return { kind: 'Soling rate', label: d.supplier(row.supplierId).name + ' · ' + M(row.rate) + '/t · ' + periodLabel(row), records: { solRates: [row] } };
+    if (key === 'suppliers') {
+      const loads = (D.purchases || []).filter((u) => u.supplierId === row.id);
+      return {
+        kind: 'Soling supplier', label: row.name + ' (' + row.code + ') with ' + loads.length + ' load(s)', amount: d.owed(row),
+        records: { suppliers: [row], purchases: loads, supPayments: (D.supPayments || []).filter((p) => p.supplierId === row.id), solRates: (D.solRates || []).filter((r) => r.supplierId === row.id) },
+      };
+    }
     if (key === 'staging') return { kind: 'Import row', label: row.serial + ' · ' + row.name + ' · ' + row.material + ' · ' + row.date, amount: row.amount, records: { staging: [row] } };
     return { kind: KIND_NAME[key] || 'Record', label: row.name || row.ticket || row.head || row.code || row.id, amount: row.amount || null, records: { [key]: [row] } };
   };
@@ -419,7 +494,7 @@ export default function App() {
       const db = { ...st.db, voided: [entry].concat(st.db.voided || []) };
       Object.entries(entry.records).forEach(([k, items]) => { db[k] = drop(st.db[k] || [], items, k === 'staging' ? 'key' : 'id'); });
       if (key === 'customers') db.suppliers = st.db.suppliers.map((p) => (p.linkedCustId === row.id ? { ...p, linkedCustId: '' } : p));
-      return { db, modal: null, ...(key === 'customers' && st.mod === 'party' ? { mod: 'customers' } : {}) };
+      return { db, modal: null, ...(key === 'customers' && st.mod === 'party' ? { mod: 'customers' } : key === 'suppliers' && st.mod === 'supplier' ? { mod: 'suppliers' } : {}) };
     });
     toast(entry.kind + ' moved to Voided entries.');
   };
@@ -438,8 +513,12 @@ export default function App() {
   };
 
   // ---- PDF reports ----
-  const openReport = (custId, type, range = {}) => set({
-    modal: { kind: 'report', custId, title: custId ? 'Generate report — ' + d.cust(custId).name : 'All credit parties report', kicker: 'PDF report', confirmLabel: 'Download PDF' },
+  // who: { supplierId } for one soling supplier, { suppliers: true } for all of them; otherwise a party (custId) or all parties.
+  const openReport = (custId, type, range = {}, who = {}) => set({
+    modal: {
+      kind: 'report', custId, supplierId: who.supplierId || '', allSuppliers: !!who.suppliers, kicker: 'PDF report', confirmLabel: 'Download PDF',
+      title: custId ? 'Generate report — ' + d.cust(custId).name : who.supplierId ? 'Generate report — ' + d.supplier(who.supplierId).name : who.suppliers ? 'All soling suppliers report' : 'All credit parties report',
+    },
     form: { type: type || 'statement', copy: 'party', fromDate: range.fromDate || '', fromTime: range.fromTime || '', toDate: range.toDate || '', toTime: range.toTime || '' },
     errors: {},
   });
@@ -449,9 +528,12 @@ export default function App() {
     const from = f.fromDate ? f.fromDate + ' ' + (f.fromTime || '00:00') : '';
     const to = f.toDate ? f.toDate + ' ' + (f.toTime || '23:59') : '';
     if (from && to && to < from) { set({ errors: { toDate: 'The end is before the start.' } }); return; }
-    const { partyReport, allPartiesReport } = await import('./lib/report');
-    if (s.modal.custId) await partyReport({ d, party: d.cust(s.modal.custId), type: f.type, from, to, copy: f.copy });
-    else await allPartiesReport({ d, from, to });
+    const m = s.modal;
+    const R = await import('./lib/report');
+    if (m.custId) await R.partyReport({ d, party: d.cust(m.custId), type: f.type, from, to, copy: f.copy });
+    else if (m.supplierId) await R.supplierReport({ d, sup: d.supplier(m.supplierId), type: f.type, from, to });
+    else if (m.allSuppliers) await R.allSuppliersReport({ d, from, to });
+    else await R.allPartiesReport({ d, from, to });
     set({ modal: null });
     toast('Report downloaded.');
   };
@@ -461,7 +543,7 @@ export default function App() {
     if (s.mod === 'payments') { openReceipt(s.db.customers[0]); return; }
     const f = {};
     cfg.fields.forEach((x) => {
-      f[x.k] = x.type === 'select' ? (x.options[0] ? x.options[0].v : '') : x.type === 'date' ? isoDate() : '';
+      f[x.k] = x.type === 'select' ? (x.options[0] ? x.options[0].v : '') : x.type === 'date' ? isoDate() : x.type === 'time' ? hhmm() : '';
     });
     set({ modal: { kind: 'form', cfgMod: s.mod, title: cfg.add, kicker: 'Create', confirmLabel: 'Save' }, form: f, errors: {} });
   };
@@ -506,21 +588,24 @@ export default function App() {
     toast(d.mat(rec.matId).name + ' at ' + M(rec.rate) + '/t from ' + rec.from + ' saved ' + (m.custId ? 'for ' + rateTarget(m.custId) : 'as the standard rate') + '.' + closed);
   };
 
-  const askEndRate = (card) => set({
+  const askEndRate = (card, coll = 'rates') => set({
     modal: {
-      kind: 'endRate', id: card.id, title: 'End ' + d.mat(card.matId).name + ' at ' + M(card.rate) + '/t?', kicker: rateTarget(card.custId), confirmLabel: 'End rate',
+      kind: 'endRate', id: card.id, coll, confirmLabel: 'End rate',
+      title: 'End ' + (coll === 'solRates' ? 'soling' : d.mat(card.matId).name) + ' at ' + M(card.rate) + '/t?',
+      kicker: coll === 'solRates' ? d.supplier(card.supplierId).name : rateTarget(card.custId),
     },
     form: { to: isoDate() < card.from ? card.from : isoDate() },
     errors: {},
   });
 
   const endRate = () => {
-    const card = s.db.rates.find((r) => r.id === s.modal.id);
+    const coll = s.modal.coll || 'rates';
+    const card = s.db[coll].find((r) => r.id === s.modal.id);
     const to = s.form.to;
     if (!to) { set({ errors: { to: 'Required.' } }); return; }
     if (to < card.from) { set({ errors: { to: 'The rate starts on ' + card.from + '; pick that day or later.' } }); return; }
-    set((st) => ({ db: { ...st.db, rates: st.db.rates.map((r) => (r.id === card.id ? { ...r, to } : r)) }, modal: null }));
-    toast(d.mat(card.matId).name + ' at ' + M(card.rate) + '/t now ends ' + to + '.');
+    set((st) => ({ db: { ...st.db, [coll]: st.db[coll].map((r) => (r.id === card.id ? { ...r, to } : r)) }, modal: null }));
+    toast((coll === 'solRates' ? d.supplier(card.supplierId).name : d.mat(card.matId).name) + ' at ' + M(card.rate) + '/t now ends ' + to + '.');
   };
 
   const onRowAction = (kind, row) => {
@@ -529,6 +614,7 @@ export default function App() {
     else if (kind === 'receipt') openReceipt(row);
     else if (kind === 'reinstate') reinstate(row);
     else if (kind === 'pay') openTicketPay(row);
+    else if (kind === 'supplier') openSupplier(row.supplierId);
   };
 
   const postReceipt = () => {
@@ -575,6 +661,7 @@ export default function App() {
       if (newOrder) return { db: { ...st.db, orders: [newOrder].concat(list) }, modal: null, seq: st.seq + 1 };
       const extra = c.key === 'customers' ? { code: nextCode(list, 'CP-', 3), received: 0, last: '—' }
         : c.key === 'suppliers' ? { code: nextCode(list, 'SP-', 2) }
+          : c.key === 'purchases' ? { batchId: '', by: SIGNED_IN_AS }
           : c.key === 'materials' ? { code: 'MT-' + String(list.length + 1).padStart(2, '0'), unit: 'Ton' }
             : c.key === 'employees' ? { code: 'EM-' + String(list.length + 1).padStart(2, '0') } : {};
       return { db: { ...st.db, [c.key]: [{ id: 'N' + Date.now(), ...extra, ...rec }].concat(list) }, modal: null };
@@ -589,6 +676,7 @@ export default function App() {
       openTicketPay(editedOrder);
       return;
     }
+    if (c.key === 'purchases') { toast('Soling load ' + (m.id ? 'updated' : 'saved') + ' for ' + d.supplier(rec.supplierId).name + '.'); return; }
     toast(m.id ? (rec.name || rec.ticket || 'Record') + ' updated.' : (rec.name || (newOrder && newOrder.ticket) || 'Record') + ' created.');
   };
 
@@ -626,8 +714,23 @@ export default function App() {
         { k: 'ref', label: 'Reference / UTR / cheque no.' },
         { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
       ]
+        : m.kind === 'supPay' ? [
+          { k: 'amount', label: 'Amount paid (₹)', type: 'number', hint: (() => { const o = d.owed(d.supplier(m.id)); return o < -0.5 ? 'Already paid ahead ' + M(-o) : 'We owe ' + M(Math.max(0, o)); })() },
+          { k: 'method', label: 'Method', type: 'select', options: RECEIPT_METHODS },
+          { k: 'date', label: 'Date', type: 'date' },
+          { k: 'time', label: 'Time', type: 'time' },
+          { k: 'ref', label: 'Reference / UTR / cheque no.', span: 'span 2' },
+          { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+        ]
+        : m.kind === 'solRate' ? [
+          { k: 'rate', label: 'Rate (₹ per ton)', type: 'number', placeholder: '400', hint: (() => { const r = s.form.from ? d.solRateFor(m.id, s.form.from) : null; return r ? (r.rate ? 'On ' + s.form.from + ' the rate is ' + M(r.rate) + '/t' : 'No rate is set for ' + s.form.from + ' yet') : null; })() },
+          { k: 'from', label: 'Effective from', type: 'date' },
+          { k: 'to', label: 'Until (optional)', type: 'date', hint: 'Leave blank if this rate carries on' },
+          { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
+        ]
         : m.kind === 'delete' ? [{ k: 'reason', label: 'Reason', span: 'span 2', hint: 'Optional — it moves to Voided entries and can be restored from there' }]
           : m.kind === 'report' ? [
+            ...(m.supplierId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (loads + payments)' }, { v: 'loads', l: 'Soling loads supplied' }, { v: 'payments', l: 'Payments made' }] }] : []),
             ...(m.custId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (loads + payments)' }, { v: 'loads', l: 'Loads taken' }, { v: 'payments', l: 'Payment history' }] }] : []),
             ...(m.custId ? [{ k: 'copy', label: 'Copy for', type: 'select', options: [{ v: 'party', l: 'The party (hides who received payments)' }, { v: 'company', l: 'Company (shows who received payments)' }] }] : []),
             ...range(true), ...range(false),
@@ -649,7 +752,7 @@ export default function App() {
       setField: (k, v) => set((st) => ({ form: { ...st.form, [k]: v }, errors: { ...st.errors, [k]: null } })),
       calcLines: formCfg && formCfg.calc ? formCfg.calc(s.form) : null,
       onConfirm: {
-        delete: doDelete, void: doVoid, receipt: postReceipt, rate: saveRate, endRate, report: makeReport,
+        delete: doDelete, void: doVoid, receipt: postReceipt, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
         clearStaging: () => {
           const rows = s.db.staging;
           const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
@@ -666,7 +769,8 @@ export default function App() {
 
   const meta = party
     ? { ...MODS.party, title: party.name, sub: [party.owner && 'Owner ' + party.owner, party.contact, party.address].filter(Boolean).join(' · ') || 'Credit party — add owner, contact and address with Edit details.' }
-    : MODS[s.mod] || MODS.dashboard;
+    : sup ? { ...MODS.supplier, title: sup.name, sub: [sup.owner && 'Owner ' + sup.owner, sup.contact, sup.upi && 'UPI ' + sup.upi].filter(Boolean).join(' · ') || 'Soling supplier — add owner, contact and UPI with Edit details.' }
+      : MODS[s.mod] || MODS.dashboard;
   const atStation = ['weighbridge', 'dashboard', 'import', 'voids'].includes(s.mod);
   const onRates = s.mod === 'party' || s.mod === 'stdrates';
   const filters = { q: s.q, status: s.status, from: s.from, to: s.to, sortK: s.sortK, sortDir: s.sortDir };
@@ -685,8 +789,8 @@ export default function App() {
             tons={T(tonsToday) + ' t'}
             now={s.now}
             onWeighbridge={() => go('weighbridge')}
-            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : s.mod === 'customers' ? 'New credit party' : 'New entry'}
-            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : openAdd}
+            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : sup ? 'Add soling load' : s.mod === 'customers' ? 'New credit party' : s.mod === 'suppliers' ? 'New soling supplier' : 'New entry'}
+            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : sup ? () => openNewSoling(sup.id) : openAdd}
           />
           <main
             className="ag-main"
@@ -704,7 +808,7 @@ export default function App() {
                 onAddRate={(matId) => openRate(party.id, matId)}
                 onEndRate={askEndRate}
                 onDeleteRate={(card) => askDelete(card, 'rates')}
-                onOpenSuppliers={() => go('suppliers')}
+                onOpenSuppliers={() => { const p = supplierOfParty(party.id); if (p) openSupplier(p.id); else go('suppliers'); }}
                 onEditLoad={(o) => openEdit(o, 'orders')}
                 onPayLoad={openTicketPay}
                 onDeleteLoad={(o) => askDelete(o, 'orders')}
@@ -750,6 +854,36 @@ export default function App() {
             )}
             {s.mod === 'customers' && (
               <CreditParties d={d} onOpen={openParty} onAdd={openAdd} onReport={() => openReport('', 'statement')} />
+            )}
+            {s.mod === 'suppliers' && (
+              <SolingSuppliers d={d} onOpen={openSupplier} onAdd={openAdd} onReport={() => openReport('', 'statement', {}, { suppliers: true })} />
+            )}
+            {sup && (
+              <SupplierDetail
+                key={sup.id}
+                d={d}
+                sup={sup}
+                tab={s.supplierTab}
+                setTab={(t) => set({ supplierTab: t })}
+                onBack={() => go('suppliers')}
+                onEdit={() => openEdit(sup, 'suppliers')}
+                onAddLoad={() => openNewSoling(sup.id)}
+                onEditLoad={(u) => openEdit(u, 'purchases')}
+                onDeleteLoad={(u) => askDelete(u, 'purchases')}
+                onPay={() => openSupPay(sup)}
+                onDeletePay={(p) => askDelete(p, 'supPayments')}
+                onOpenParty={openParty}
+                onAddRate={() => openSolRate(sup.id)}
+                onEndRate={(r) => askEndRate(r, 'solRates')}
+                onDeleteRate={(r) => askDelete(r, 'solRates')}
+                onReport={(type, range) => openReport('', type, range, { supplierId: sup.id })}
+              />
+            )}
+            {s.mod === 'supplier' && !sup && (
+              <div className="ag-glass" style={{ padding: 'var(--space-6)' }}>
+                <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 16 }}>This soling supplier no longer exists</div>
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }} onClick={() => go('suppliers')}>All soling suppliers</button>
+              </div>
             )}
             {s.mod === 'voids' && <VoidedEntries d={d} onRestore={restoreEntry} onReinstate={reinstate} />}
             {cfg && !CUSTOM_LISTS.includes(s.mod) && (

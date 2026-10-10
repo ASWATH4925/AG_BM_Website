@@ -171,21 +171,24 @@ export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditP
           className="ag-rise"
           style={{ marginTop: 'var(--space-6)' }}
           title="Soling loads (purchases)"
-          sub="Boulders bought from suppliers. Saved exactly as the register shows them; pricing and what we owe come with the soling module."
+          sub="Boulders bought from suppliers. Net boulders = register Net − Gross (the truck comes in loaded), valued at the supplier's rate on that date."
           action={<button type="button" className="btn btn-primary" disabled={!readySoling.length} onClick={onPostSoling}>Save {readySoling.length} soling load{readySoling.length === 1 ? '' : 's'}</button>}
         >
           <div style={{ overflowX: 'auto' }}>
-            <table className="table" style={{ width: '100%', minWidth: 860 }}>
+            <table className="table" style={{ width: '100%', minWidth: 1080 }}>
               <thead>
                 <tr>
                   <th style={TH}>Serial</th><th style={TH}>Date / time</th><th style={TH}>Vehicle</th><th style={TH}>Register name → supplier</th>
-                  <th style={{ ...TH, textAlign: 'right' }}>Tare</th><th style={{ ...TH, textAlign: 'right' }}>Gross</th><th style={{ ...TH, textAlign: 'right' }}>Net</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>Empty (Gross)</th><th style={{ ...TH, textAlign: 'right' }}>Loaded (Net)</th><th style={{ ...TH, textAlign: 'right' }}>Boulders (t)</th>
+                  <th style={{ ...TH, textAlign: 'right' }}>Rate / t</th><th style={{ ...TH, textAlign: 'right' }}>We owe</th>
                   <th style={TH}>Status</th><th style={{ ...TH, textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {soling.map((r) => {
                   const st = solingStatus(r);
+                  const u = { supplierId: r.supplierId, date: r.date, tare: r.gross, gross: r.net };
+                  const rate = r.supplierId ? d.solRate(u).rate : 0;
                   return (
                     <tr key={r.key}>
                       <td style={{ fontWeight: 600 }}>{r.serial}</td>
@@ -195,9 +198,11 @@ export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditP
                         <div style={{ fontSize: 11.5, color: 'var(--color-neutral-600)', marginBottom: 4 }}>{r.name}</div>
                         <Select label={'Supplier for ' + r.serial} value={r.supplierId} placeholder="Choose supplier…" options={supplierOptions(r)} onChange={(v) => onSupplier(r.key, v)} />
                       </td>
-                      <td className="ag-tabular" style={{ textAlign: 'right' }}>{r.tare ? r.tare.toLocaleString('en-IN') : '—'}</td>
                       <td className="ag-tabular" style={{ textAlign: 'right' }}>{r.gross.toLocaleString('en-IN')}</td>
                       <td className="ag-tabular" style={{ textAlign: 'right' }}>{r.net.toLocaleString('en-IN')}</td>
+                      <td className="ag-tabular" style={{ textAlign: 'right', fontWeight: 600 }}>{T(d.net(u))}</td>
+                      <td className="ag-tabular" style={{ textAlign: 'right' }}>{rate ? M(rate) : '—'}</td>
+                      <td className="ag-tabular" style={{ textAlign: 'right' }}>{rate ? M(d.solValue(u)) : r.supplierId ? 'No rate' : '—'}</td>
                       <td><Tag cls={st.cls}>{st.label}</Tag></td>
                       <td style={{ textAlign: 'right' }}><button type="button" className="btn btn-ghost" onClick={() => onRemove(r.key)}>Remove</button></td>
                     </tr>

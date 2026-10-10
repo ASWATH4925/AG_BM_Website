@@ -112,6 +112,49 @@ export function createDomain(db) {
     const sum = (k) => inRange.reduce((s, r) => s + r[k], 0);
     return { opening, rows: inRange, debit: sum('debit'), credit: sum('credit'), closing: bal };
   };
+  // ---- soling suppliers: what we owe them ----
+  // A soling load's value = net tons × the supplier's rate on that date (or a manual rate) + any extra charges.
+  const purchases = db.purchases || [];
+  const solRates = db.solRates || [];
+  const solRateFor = (supplierId, date = isoDate()) => {
+    const card = solRates
+      .filter((r) => r.supplierId === supplierId && r.from <= date && (!r.to || date <= r.to))
+      .sort((a, b) => b.from.localeCompare(a.from))[0];
+    return card ? { rate: card.rate, src: 'supplier rate', card } : { rate: 0, src: 'no rate set', card: null };
+  };
+  const solRate = (u) => (+u.manualRate > 0 ? { rate: +u.manualRate, src: 'manual rate' } : solRateFor(u.supplierId, u.date));
+  const solAmount = (u) => net(u) * solRate(u).rate;
+  const solValue = (u) => solAmount(u) + (+u.extra || 0);
+  const solLoadsOf = (supplierId) => purchases.filter((u) => u.supplierId === supplierId);
+  // Paid to a supplier: by the company, or by a party / walk-in who sent the money straight to them.
+  const voidTickets = new Set(db.orders.filter((o) => o.status === 'Void').map((o) => o.id));
+  const supplierPaysOf = (supplierId) => (db.supPayments || [])
+    .filter((p) => p.supplierId === supplierId)
+    .map((p) => ({ p, source: 'company', by: 'Company' }))
+    .concat(payments
+      .filter((p) => p.toType === 'supplier' && p.supplierId === supplierId && !voidTickets.has(p.ticketId))
+      .map((p) => ({ p, source: 'party', by: p.custId ? cust(p.custId).name : (p.walkIn || 'Walk-in') + ' (walk-in)' })));
+  const supplied = (sup) => solLoadsOf(sup.id).reduce((s, u) => s + solValue(u), 0);
+  const paidToSupplier = (sup) => supplierPaysOf(sup.id).reduce((s, x) => s + x.p.amount, 0);
+  // Positive = we owe them; negative = we have paid ahead.
+  const owed = (sup) => supplied(sup) - paidToSupplier(sup);
+  const lastSupplierPay = (sup) => supplierPaysOf(sup.id).map((x) => x.p.date).sort().pop() || '—';
+  const supLedger = (supplierId, from = '', to = '') => {
+    const rows = solLoadsOf(supplierId).map((u) => ({ ts: stamp(u), kind: 'load', u, ref: u.serial || 'Load', debit: solValue(u), credit: 0 }))
+      .concat(supplierPaysOf(supplierId).map((x) => ({ ts: stamp(x.p), kind: 'pay', p: x.p, source: x.source, by: x.by, method: x.p.method, debit: 0, credit: x.p.amount })));
+    rows.sort((a, b) => a.ts.localeCompare(b.ts) || (a.kind === 'load' ? -1 : 1));
+    let opening = 0;
+    const inRange = [];
+    rows.forEach((r) => {
+      if (from && r.ts < from) opening += r.debit - r.credit;
+      else if (!to || r.ts <= to) inRange.push(r);
+    });
+    let bal = opening;
+    inRange.forEach((r) => { bal += r.debit - r.credit; r.balance = bal; });
+    const sum = (k) => inRange.reduce((s, r) => s + r[k], 0);
+    return { opening, rows: inRange, debit: sum('debit'), credit: sum('credit'), closing: bal };
+  };
+
   const hours = (a) => {
     if (!a.in || a.in === '—') return 0;
     const p = (t) => {
@@ -135,6 +178,7 @@ export function createDomain(db) {
   return {
     db, cust, supplier, mat, emp, salesMaterials, rateFor, orderRate, matLabel,
     net, amount, extras, billTotal, partyLabel, paymentsFor, receiptsOf, paidOn, onCredit, loadsOf, billed, received, outstanding, lastReceipt, ledger,
+    solRateFor, solRate, solAmount, solValue, solLoadsOf, supplierPaysOf, supplied, paidToSupplier, owed, lastSupplierPay, supLedger,
     hours, advanceBalance, payLine,
   };
 }
