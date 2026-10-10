@@ -169,7 +169,9 @@ export const SEED_NEXT_TICKET = 24118;
 export function seedDb() {
   return JSON.parse(JSON.stringify({
     customers: cust, suppliers, materials: mats, rates, orders: ord, payments, purchases, solRates, supPayments: [], staging: [], imports: [], voided: [],
-    employees: emp, attendance: att, advances: adv, payroll: pay, expenses: exp, onsite,
+    employees: emp, attendance: att, advances: adv, payroll: pay, onsite,
+    expenses: exp.map((x) => ({ time: '', headOther: '', ...x, mode: x.mode === 'Bank Transfer' ? 'Account' : x.mode, head: x.head === 'Electricity' ? 'Electricity (EB)' : x.head })),
+    settings: { cashStart: 0, bankStart: 0, startDate: '' },
   }));
 }
 
@@ -178,6 +180,8 @@ export function upgradeDb(saved) {
   const db = { payments: [], purchases: [], staging: [], imports: [], suppliers: [], voided: [], supPayments: [], ...saved };
   if (!db.solRates) db.solRates = JSON.parse(JSON.stringify(solRates));
   db.purchases = db.purchases.map(normalSoling);
+  if (!db.settings) db.settings = { cashStart: 0, bankStart: 0, startDate: '' };
+  db.expenses = (db.expenses || []).map((x) => ({ time: '', headOther: '', ...x, mode: x.mode === 'Bank Transfer' ? 'Account' : x.mode, head: x.head === 'Electricity' ? 'Electricity (EB)' : x.head }));
   db.voided = db.voided.map((e) => (e.records && e.records.purchases ? { ...e, records: { ...e.records, purchases: e.records.purchases.map(normalSoling) } } : e));
   // Older saves kept a party's receipts as one running total; turn it into a receipt record so it shows in payment history.
   const receipts = [];

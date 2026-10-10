@@ -16,6 +16,8 @@ import { MODS, moduleConfig } from './lib/modules';
 import { loadSaved, save as saveToBrowser } from './lib/storage';
 import CreditParties from './views/CreditParties';
 import Dashboard from './views/Dashboard';
+import DayBook from './views/DayBook';
+import Reports from './views/Reports';
 import ListModule from './views/ListModule';
 import Login from './views/Login';
 import PartyDetail, { StandardRates } from './views/PartyDetail';
@@ -28,7 +30,7 @@ const FILTERS_CLEAR = { q: '', status: 'All', from: '', to: '', sortK: null };
 const RECEIPT_METHODS = ['Cash', 'UPI', 'Account', 'Cheque'].map((x) => ({ v: x, l: METHOD_LABEL[x] || x }));
 // Modules drawn by their own view instead of the generic list (their config still drives add/edit forms).
 const CUSTOM_LISTS = ['customers', 'suppliers', 'voids'];
-const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import'];
+const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports'];
 const SIGNED_IN_AS = 'A. Gopalakrishnan';
 
 const isWide = () => window.innerWidth >= 900;
@@ -440,6 +442,31 @@ export default function App() {
     toast(next.serial + ' updated' + (billChanged ? ' — the bill is now ' + M(rowBill(d, next).bill) + '; check its payment.' : '.'));
   };
 
+  // ---- day book ----
+  const openExpense = () => {
+    const c = cfgOf('expenses');
+    const f = {};
+    c.fields.forEach((x) => { f[x.k] = x.type === 'select' ? (x.options[0] ? x.options[0].v : '') : x.type === 'date' ? isoDate() : x.type === 'time' ? hhmm() : ''; });
+    f.mode = 'Cash';
+    set({ modal: { kind: 'form', cfgMod: 'expenses', title: 'New expense / income', kicker: 'Day book', confirmLabel: 'Save' }, form: f, errors: {} });
+  };
+  const openOpening = () => {
+    const st = s.db.settings || {};
+    set({
+      modal: { kind: 'opening', title: 'Opening balances', kicker: 'Day book', confirmLabel: 'Save balances', message: 'Count the cash in hand and check the bank balance at the start of the day you begin. The day book adds every entry from that day on.' },
+      form: { startDate: st.startDate || isoDate(), cashStart: st.cashStart || '', bankStart: st.bankStart || '' }, errors: {},
+    });
+  };
+  const saveOpening = () => {
+    const f = s.form;
+    const errs = {};
+    if (!f.startDate) errs.startDate = 'Required.';
+    ['cashStart', 'bankStart'].forEach((k) => { if (String(f[k] ?? '').trim() && !Number.isFinite(+f[k])) errs[k] = 'Enter an amount.'; });
+    if (Object.keys(errs).length) { set({ errors: errs }); return; }
+    set((st) => ({ db: { ...st.db, settings: { ...(st.db.settings || {}), startDate: f.startDate, cashStart: +f.cashStart || 0, bankStart: +f.bankStart || 0 } }, modal: null }));
+    toast('Opening balances saved from ' + f.startDate + '.');
+  };
+
   // ---- soling suppliers ----
   const openNewSoling = (supplierId) => {
     const c = cfgOf('purchases');
@@ -535,6 +562,7 @@ export default function App() {
         records: { suppliers: [row], purchases: loads, supPayments: (D.supPayments || []).filter((p) => p.supplierId === row.id), solRates: (D.solRates || []).filter((r) => r.supplierId === row.id) },
       };
     }
+    if (key === 'expenses') return { kind: row.type === 'Credit' ? 'Other income' : 'Expense', label: (row.head === 'Other' && row.headOther ? row.headOther : row.head) + ' · ' + (row.party || '') + ' · ' + row.date, amount: +row.amount || 0, records: { expenses: [row] } };
     if (key === 'staging') return { kind: 'Import row', label: row.serial + ' · ' + row.name + ' · ' + row.material + ' · ' + row.date, amount: row.amount, records: { staging: [row] } };
     return { kind: KIND_NAME[key] || 'Record', label: row.name || row.ticket || row.head || row.code || row.id, amount: row.amount || null, records: { [key]: [row] } };
   };
@@ -791,6 +819,11 @@ export default function App() {
           ...(m.sale ? [] : [{ k: 'extra', label: 'Extra charges (₹)', type: 'number', hint: 'Rent, unloading — added to what we owe' }]),
           { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
         ]
+        : m.kind === 'opening' ? [
+          { k: 'startDate', label: 'Balances as at the start of', type: 'date', span: 'span 2' },
+          { k: 'cashStart', label: 'Cash in hand (₹)', type: 'number' },
+          { k: 'bankStart', label: 'Bank & UPI balance (₹)', type: 'number' },
+        ]
         : m.kind === 'supPay' ? [
           { k: 'amount', label: 'Amount paid (₹)', type: 'number', hint: (() => { const o = d.owed(d.supplier(m.id)); return o < -0.5 ? 'Already paid ahead ' + M(-o) : 'We owe ' + M(Math.max(0, o)); })() },
           { k: 'method', label: 'Method', type: 'select', options: RECEIPT_METHODS },
@@ -847,7 +880,7 @@ export default function App() {
           ];
         })() : null,
       onConfirm: {
-        delete: doDelete, void: doVoid, receipt: postReceipt, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
+        delete: doDelete, void: doVoid, receipt: postReceipt, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
         clearStaging: () => {
           const rows = s.db.staging;
           const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
@@ -866,7 +899,7 @@ export default function App() {
     ? { ...MODS.party, title: party.name, sub: [party.owner && 'Owner ' + party.owner, party.contact, party.address].filter(Boolean).join(' · ') || 'Credit party — add owner, contact and address with Edit details.' }
     : sup ? { ...MODS.supplier, title: sup.name, sub: [sup.owner && 'Owner ' + sup.owner, sup.contact, sup.upi && 'UPI ' + sup.upi].filter(Boolean).join(' · ') || 'Soling supplier — add owner, contact and UPI with Edit details.' }
       : MODS[s.mod] || MODS.dashboard;
-  const atStation = ['weighbridge', 'dashboard', 'import', 'voids'].includes(s.mod);
+  const atStation = ['weighbridge', 'dashboard', 'import', 'voids', 'reports'].includes(s.mod);
   const onRates = s.mod === 'party' || s.mod === 'stdrates';
   const filters = { q: s.q, status: s.status, from: s.from, to: s.to, sortK: s.sortK, sortDir: s.sortDir };
   const tonsToday = s.db.orders.filter((o) => o.status !== 'Void' && o.date === TODAY).reduce((a, o) => a + d.net(o), 0);
@@ -884,8 +917,8 @@ export default function App() {
             tons={T(tonsToday) + ' t'}
             now={s.now}
             onWeighbridge={() => go('weighbridge')}
-            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : sup ? 'Add soling load' : s.mod === 'customers' ? 'New credit party' : s.mod === 'suppliers' ? 'New soling supplier' : 'New entry'}
-            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : sup ? () => openNewSoling(sup.id) : openAdd}
+            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : sup ? 'Add soling load' : s.mod === 'daybook' ? 'Add expense' : s.mod === 'customers' ? 'New credit party' : s.mod === 'suppliers' ? 'New soling supplier' : 'New entry'}
+            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : sup ? () => openNewSoling(sup.id) : s.mod === 'daybook' ? openExpense : openAdd}
           />
           <main
             className="ag-main"
@@ -952,6 +985,18 @@ export default function App() {
             {s.mod === 'customers' && (
               <CreditParties d={d} onOpen={openParty} onAdd={openAdd} onReport={() => openReport('', 'statement')} />
             )}
+            {s.mod === 'daybook' && (
+              <DayBook
+                d={d}
+                onSetOpening={openOpening}
+                onAddExpense={openExpense}
+                onEditExpense={(x) => openEdit(x, 'expenses')}
+                onDeleteExpense={(x) => askDelete(x, 'expenses')}
+                onOpenParty={openParty}
+                onOpenSupplier={openSupplier}
+              />
+            )}
+            {s.mod === 'reports' && <Reports d={d} onToast={toast} />}
             {s.mod === 'suppliers' && (
               <SolingSuppliers d={d} onOpen={openSupplier} onAdd={openAdd} onReport={() => openReport('', 'statement', {}, { suppliers: true })} />
             )}

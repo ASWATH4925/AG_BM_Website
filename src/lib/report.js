@@ -252,3 +252,30 @@ export async function allSuppliersReport({ d, from, to }) {
   footer(doc);
   doc.save('soling-suppliers-' + (from || 'start').slice(0, 10) + '-to-' + (to || 'now').slice(0, 10) + '.pdf');
 }
+
+// ---- generic multi-table report (day book, period reports) ----
+// rep: { title, lines: [text], orientation, file, sections: [{ heading, head: [..], body: [[..]], foot: [..], right: [colIndex] }] }
+export async function tablesPdf(rep) {
+  const { doc, autoTable } = await newDoc(rep.orientation || 'portrait');
+  let y = header(doc, rep.title, rep.lines || []);
+  rep.sections.forEach((sec) => {
+    if (sec.heading) {
+      if (y > doc.internal.pageSize.getHeight() - 90) { doc.addPage(); y = 50; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(32, 30, 29);
+      doc.text(sec.heading, 40, y + 4);
+      y += 12;
+    }
+    autoTable(doc, {
+      ...TABLE, startY: y,
+      head: [sec.head],
+      body: sec.body.length ? sec.body : [[{ content: 'Nothing in this period', colSpan: sec.head.length }]],
+      foot: sec.foot ? [sec.foot] : undefined,
+      columnStyles: Object.fromEntries((sec.right || []).map((i) => [i, { halign: 'right' }])),
+    });
+    y = doc.lastAutoTable.finalY + 22;
+  });
+  footer(doc);
+  doc.save(rep.file + '.pdf');
+}

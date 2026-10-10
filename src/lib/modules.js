@@ -1,3 +1,4 @@
+import { BOOK_MODES, EXPENSE_HEADS, expenseHead, INCOME_HEADS, modeName } from './books';
 import { OTHER_MATERIAL } from './domain';
 import { M, N, T } from './format';
 
@@ -17,6 +18,8 @@ export const MODS = {
   party: { label: 'Credit Parties', group: 'Masters', title: 'Credit party', sub: '', hidden: true, navAs: 'customers' },
   supplier: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling supplier', sub: '', hidden: true, navAs: 'suppliers' },
   stdrates: { label: 'Materials', group: 'Masters', title: 'Standard rates', sub: 'Rate per ton applied when a party has no rate of its own for that date.', hidden: true, navAs: 'materials' },
+  daybook: { label: 'Day Book', group: 'Finance', title: 'Day book', sub: 'Every rupee in and out — cash in hand and bank balance, day by day.' },
+  reports: { label: 'Reports', group: 'Finance', title: 'Reports', sub: 'Sales, collections, soling, expenses and profit for any period — as PDF or Excel — and a full backup.' },
   payments: { label: 'Payments & Credit', group: 'Finance', title: 'Payments & credit', sub: 'Receipts, outstanding balances and ageing by account.' },
   expenses: { label: 'Expenses', group: 'Finance', title: 'Expenses', sub: 'Credit and debit entries against the yard.' },
   employees: { label: 'Employees', group: 'People', title: 'Employees', sub: 'Roster, roles and monthly salary.' },
@@ -241,16 +244,28 @@ export function moduleConfig(mod, d) {
   };
 
   if (mod === 'expenses') return {
-    key: 'expenses', add: 'New entry', dateKey: 'date', statusKey: 'type', statuses: ['All', 'Debit', 'Credit'],
+    key: 'expenses', add: 'New expense / income', dateKey: 'date', statusKey: '_t', statuses: ['All', 'Expense', 'Income'],
     cols: [
-      { k: 'date', label: 'Date' }, { k: 'head', label: 'Head' }, { k: 'desc', label: 'Description' }, { k: 'type', label: 'Cr / Dr', t: 'tag' },
-      { k: 'amount', label: 'Amount', t: 'money' }, { k: 'mode', label: 'Mode' }, { k: 'party', label: 'Paid to / from' },
+      { k: 'date', label: 'Date' }, { k: 'time', label: 'Time' }, { k: '_t', label: 'Type', t: 'tag', get: (x) => (x.type === 'Credit' ? 'Income' : 'Expense') },
+      { k: '_h', label: 'Head', get: (x) => expenseHead(x) }, { k: 'desc', label: 'Description' },
+      { k: 'amount', label: 'Amount', t: 'money' }, { k: '_m', label: 'Mode', get: (x) => modeName(x.mode) }, { k: 'party', label: 'Paid to / from' },
     ],
     fields: [
-      { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'head', label: 'Expense head', req: 1 }, { k: 'desc', label: 'Description', span: 'span 2' },
-      { k: 'type', label: 'Credit / Debit', type: 'select', options: opts(['Debit', 'Credit']) }, { k: 'amount', label: 'Amount', type: 'number', req: 1 },
-      { k: 'mode', label: 'Mode', type: 'select', options: opts(['Cash', 'UPI', 'Bank Transfer', 'Credit']) }, { k: 'party', label: 'Paid to / received from' },
+      { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'time', label: 'Time', type: 'time' },
+      { k: 'type', label: 'Type', type: 'select', options: [{ v: 'Debit', l: 'Expense — money going out' }, { v: 'Credit', l: 'Other income — money coming in' }] },
+      { k: 'head', label: 'Head', type: 'select', req: 1, options: [...new Set(EXPENSE_HEADS.concat(INCOME_HEADS, (D.expenses || []).map((x) => x.head).filter(Boolean)))].map((h) => ({ v: h, l: h })) },
+      { k: 'headOther', label: 'Head name (for Other)', hint: 'Only when the head is Other / Other income' },
+      { k: 'amount', label: 'Amount (₹)', type: 'number', req: 1 },
+      { k: 'mode', label: 'Paid by', type: 'select', options: BOOK_MODES.map((m) => ({ v: m, l: modeName(m) })) },
+      { k: 'party', label: 'Paid to / received from' },
+      { k: 'desc', label: 'Description / remarks', span: 'span 2', hint: 'Optional' },
     ],
+    validate: (f) => {
+      const e = {};
+      if (String(f.amount ?? '').trim() && !(+f.amount > 0)) e.amount = 'Enter an amount greater than zero.';
+      if ((f.head === 'Other' || f.head === 'Other income') && !String(f.headOther || '').trim()) e.headOther = 'Type what this was for.';
+      return e;
+    },
     foot: (rows) => {
       const dr = rows.filter((x) => x.type === 'Debit').reduce((s, x) => s + x.amount, 0);
       const cr = rows.filter((x) => x.type === 'Credit').reduce((s, x) => s + x.amount, 0);
