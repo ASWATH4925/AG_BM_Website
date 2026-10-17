@@ -12,6 +12,7 @@ import SupplierDetail from './views/SupplierDetail';
 import RegisterImport, { rowBill, saleStatus, solingStatus } from './views/RegisterImport';
 import { createDomain, OTHER_MATERIAL, periodLabel, planRate } from './lib/domain';
 import { hhmm, isoDate, M, N, T } from './lib/format';
+import { onEnterKey } from './lib/enterNav';
 import { MODS, moduleConfig } from './lib/modules';
 import { loadSaved, save as saveToBrowser } from './lib/storage';
 import CreditParties from './views/CreditParties';
@@ -104,6 +105,12 @@ export default function App() {
     window.addEventListener('resize', onResize);
     return () => { clearInterval(clock); window.removeEventListener('resize', onResize); clearTimeout(toastTimer.current); };
   }, [set]);
+
+  // Enter moves to the next field on every form, so staff can type without the mouse.
+  useEffect(() => {
+    document.addEventListener('keydown', onEnterKey);
+    return () => document.removeEventListener('keydown', onEnterKey);
+  }, []);
 
   // Keep every change in this browser (until a shared database is added).
   useEffect(() => {

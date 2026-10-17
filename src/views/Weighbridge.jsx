@@ -83,6 +83,7 @@ export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut
             </div>
           </div>
 
+          <div data-enter-scope>
           <div style={{ padding: 'var(--space-4)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 'var(--space-3)' }}>
             <Field label="Vehicle number" as="label">
               <input className="input" style={{ width: '100%' }} placeholder="TN 29 BX 4412" value={wb.vehicle} onChange={(e) => setWb({ vehicle: e.target.value, err: '' })} />
@@ -97,7 +98,7 @@ export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut
 
           <div style={{ padding: '0 var(--space-4) var(--space-4)' }}>
             <div style={{ display: 'flex', gap: 'var(--space-3)', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button type="button" className="btn btn-primary" onClick={onCapture}>Capture tare · open ticket</button>
+              <button type="button" className="btn btn-primary" data-enter-submit onClick={onCapture}>Capture tare · open ticket</button>
               <span style={{ fontSize: 12, color: 'var(--color-neutral-700)' }}>
                 Applied rate: <strong className="ag-tabular">{M(rate.rate)} / t</strong> ({rate.src})
               </span>
@@ -107,6 +108,7 @@ export default function Weighbridge({ d, scale, wb, setWb, onCapture, onWeighOut
                 {wb.err}
               </div>
             )}
+          </div>
           </div>
         </Panel>
 

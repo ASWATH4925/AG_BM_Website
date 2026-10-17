@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { focusNext } from '../lib/enterNav';
 import { ChevronDown } from './Icons';
 
 const MENU_MAX = 300;
@@ -13,6 +14,7 @@ export default function Select({ value, options, onChange, placeholder = 'Select
   const [pos, setPos] = useState(null);
   const trigger = useRef(null);
   const search = useRef(null);
+  const typed = useRef('');
   const id = useId();
   const cur = options.find((o) => String(o.v) === String(value));
   const shown = q.trim() ? options.filter((o) => o.l.toLowerCase().includes(q.trim().toLowerCase())) : options;
@@ -37,19 +39,23 @@ export default function Select({ value, options, onChange, placeholder = 'Select
 
   useEffect(() => {
     if (!open) return;
-    setQ('');
-    setHi(Math.max(0, options.findIndex((o) => String(o.v) === String(value))));
+    const first = typed.current;
+    typed.current = '';
+    setQ(first);
+    setHi(first ? 0 : Math.max(0, options.findIndex((o) => String(o.v) === String(value))));
     setTimeout(() => search.current?.focus(), 0);
   }, [open]);
 
   const close = (refocus) => { setOpen(false); if (refocus) trigger.current?.focus(); };
-  const choose = (o) => { close(true); onChange(o.v); };
+  // Picking with the keyboard moves straight on to the next field.
+  const choose = (o, byKey) => { close(true); onChange(o.v); if (byKey) setTimeout(() => trigger.current && focusNext(trigger.current), 0); };
 
   const onKey = (e) => {
     if (e.key === 'Escape') { e.stopPropagation(); close(true); }
     else if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(shown.length - 1, h + 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
-    else if (e.key === 'Enter') { e.preventDefault(); if (shown[hi]) choose(shown[hi]); }
+    else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (shown[hi]) choose(shown[hi], true); }
+    else if (e.key === 'Tab') { close(false); }
   };
 
   return (
@@ -64,6 +70,20 @@ export default function Select({ value, options, onChange, placeholder = 'Select
         aria-controls={id}
         aria-label={label}
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.ctrlKey || e.altKey || e.metaKey) return;
+          if (open) {
+            // Keys typed before the search box takes focus still go to the list (fast typists).
+            if (e.key.length === 1 && e.key !== ' ') { e.preventDefault(); setQ((x) => x + e.key); setHi(0); }
+            else if (e.key === 'Backspace') { e.preventDefault(); setQ((x) => x.slice(0, -1)); setHi(0); }
+            else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); if (shown[hi]) choose(shown[hi], true); }
+            else onKey(e);
+            return;
+          }
+          // Start typing on a closed dropdown to open it and search; arrow down opens it too.
+          if (e.key.length === 1 && e.key !== ' ') { e.preventDefault(); typed.current = e.key; setOpen(true); }
+          else if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); }
+        }}
       >
         <span>{cur ? cur.l : placeholder}</span>
         <ChevronDown />
