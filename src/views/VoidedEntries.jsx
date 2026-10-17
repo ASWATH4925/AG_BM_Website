@@ -5,7 +5,7 @@ import { M } from '../lib/format';
 const TH = { cursor: 'default' };
 
 // Everything deleted anywhere, with who removed it, when and why. Any entry can be restored.
-export default function VoidedEntries({ d, onRestore, onReinstate }) {
+export default function VoidedEntries({ d, onRestore, onReinstate, onPurge }) {
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('All');
   const [from, setFrom] = useState('');
@@ -62,6 +62,7 @@ export default function VoidedEntries({ d, onRestore, onReinstate }) {
                   <td>{e.by}</td>
                   <td style={{ textAlign: 'right' }}>
                     <button type="button" className="btn btn-ghost" onClick={() => (e.order ? onReinstate(e.order) : onRestore(e))}>Restore</button>
+                    {!e.order && <button type="button" className="btn btn-ghost" onClick={() => onPurge(e)}>Delete permanently</button>}
                   </td>
                 </tr>
               ))}

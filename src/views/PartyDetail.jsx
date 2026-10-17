@@ -4,7 +4,9 @@ import RateBoard from '../components/RateBoard';
 import StatTile from '../components/StatTile';
 import Tag from '../components/Tag';
 import { M, T } from '../lib/format';
+import { touches } from '../lib/access';
 import { METHOD_LABEL, paidToLabel } from '../lib/payments';
+import { ChangeDetail } from './Activity';
 
 const TABS = ['Loads taken', 'Payment history', 'Statement', 'Rates', 'Contact details'];
 const TH = { cursor: 'default' };
@@ -62,8 +64,10 @@ export function Empty({ children }) {
 // One credit party's account: loads, payments, statement, rates and contact details.
 export default function PartyDetail({
   d, party, tab, setTab, onBack, onEdit, onAddRate, onEndRate, onDeleteRate, onOpenSuppliers,
-  onEditLoad, onPayLoad, onDeleteLoad, onReceipt, onDeleteReceipt, onReport, onAddLoad,
+  onEditLoad, onPayLoad, onDeleteLoad, onReceipt, onDeleteReceipt, onReport, onAddLoad, showHistory, onDeleteAccount,
 }) {
+  const tabs = showHistory ? TABS.concat(['History']) : TABS;
+  const history = showHistory ? (d.db.audit || []).filter((a) => a.ops.some((o) => touches(o, { custId: party.id }))).slice().sort((a, b) => b.at.localeCompare(a.at)) : [];
   const [range, setRange] = useState({ fromDate: '', fromTime: '', toDate: '', toTime: '' });
   const { from, to } = rangeStamps(range);
   const L = d.ledger(party.id, from, to);
@@ -72,7 +76,7 @@ export default function PartyDetail({
   const supplier = (d.db.suppliers || []).find((p) => p.linkedCustId === party.id);
   const supplierName = (id) => d.supplier(id).name;
   const sum = (list, f) => list.reduce((s, x) => s + f(x), 0);
-  const current = tab && TABS.includes(tab) ? tab : TABS[0];
+  const current = tab && tabs.includes(tab) ? tab : TABS[0];
   const reportBtn = (type, label) => <button type="button" className="btn btn-primary" onClick={() => onReport(type, range)}>{label}</button>;
   const foot = { ...R, padding: '12px 24px' };
 
@@ -101,7 +105,7 @@ export default function PartyDetail({
       </div>
 
       <div role="tablist" aria-label="Account sections" style={{ display: 'flex', flexWrap: 'wrap', borderBottom: '1px solid rgba(32,30,29,.10)', margin: 'var(--space-6) 0' }}>
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t} type="button" role="tab" aria-selected={current === t} className="ag-tab" data-on={current === t ? '1' : '0'} onClick={() => setTab(t)}>
             {t}<i />
           </button>
@@ -262,10 +266,31 @@ export default function PartyDetail({
         </div>
       )}
 
+
+      {current === 'History' && (
+        <Panel className="ag-rise" title="History" sub="Every change on this account — who made it and when">
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table" style={{ width: '100%', minWidth: 760 }}>
+              <thead><tr><th style={TH}>When</th><th style={TH}>Who</th><th style={TH}>What changed</th></tr></thead>
+              <tbody>
+                {history.map((a) => (
+                  <tr key={a.id}>
+                    <td className="ag-tabular" style={{ whiteSpace: 'nowrap' }}>{a.at.slice(0, 16).replace('T', ' ')}</td>
+                    <td style={{ fontWeight: 600 }}>{a.userName}{a.approvedBy ? <div style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--color-neutral-600)' }}>approved by {a.approvedBy}</div> : null}{a.rolledBack ? <div style={{ fontWeight: 400, fontSize: 11.5, color: '#8a5207' }}>undone by {a.rolledBack.by}</div> : null}</td>
+                    <td style={{ whiteSpace: 'normal' }}><strong>{a.label}</strong><ChangeDetail ops={a.ops.filter((o) => touches(o, { custId: party.id }))} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {history.length === 0 && <Empty>No changes recorded on this account yet.</Empty>}
+        </Panel>
+      )}
+
       {current === 'Rates' && <RateBoard d={d} custId={party.id} onAdd={onAddRate} onEnd={onEndRate} onDelete={onDeleteRate} />}
 
       {current === 'Contact details' && (
-        <Panel className="ag-rise" title="Contact details" sub="Used on statements sent to the party" action={<button type="button" className="btn btn-secondary" onClick={onEdit}>Edit details</button>}>
+        <Panel className="ag-rise" title="Contact details" sub="Used on statements sent to the party" action={<div style={{ display: 'flex', gap: 'var(--space-2)' }}><button type="button" className="btn btn-secondary" onClick={onEdit}>Edit details</button><button type="button" className="btn btn-ghost" onClick={onDeleteAccount}>Delete account</button></div>}>
           <div style={{ padding: 'var(--space-6)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(220px,100%),1fr))', gap: 'var(--space-6)' }}>
             <Info label="Party name" value={party.name} />
             <Info label="Owner" value={party.owner} />

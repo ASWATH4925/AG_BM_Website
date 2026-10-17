@@ -13,6 +13,12 @@ import RegisterImport, { rowBill, saleStatus, solingStatus } from './views/Regis
 import { createDomain, OTHER_MATERIAL, periodLabel, planRate } from './lib/domain';
 import { hhmm, isoDate, M, N, T } from './lib/format';
 import { onEnterKey } from './lib/enterNav';
+import {
+  applyOps, canOpen, conflicts, describe, deviceGuess, deviceId, diffDb, hashSecret, levelOf, newSalt, strictest, taskLabel, tasksFor,
+} from './lib/access';
+import Access from './views/Access';
+import Activity, { Approvals } from './views/Activity';
+import { DeviceGate, SetupOwner, SignIn } from './views/Lock';
 import { MODS, moduleConfig } from './lib/modules';
 import { loadSaved, save as saveToBrowser } from './lib/storage';
 import CreditParties from './views/CreditParties';
@@ -37,8 +43,9 @@ const FILTERS_CLEAR = { q: '', status: 'All', from: '', to: '', sortK: null };
 const RECEIPT_METHODS = ['Cash', 'UPI', 'Account', 'Cheque'].map((x) => ({ v: x, l: METHOD_LABEL[x] || x }));
 // Modules drawn by their own view instead of the generic list (their config still drives add/edit forms).
 const CUSTOM_LISTS = ['customers', 'suppliers', 'voids', 'bunks', 'vendors'];
-const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports', 'attendance', 'payroll', 'creditor', 'eb'];
-const SIGNED_IN_AS = 'A. Gopalakrishnan';
+const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports', 'attendance', 'payroll', 'creditor', 'eb', 'access', 'activity', 'approvals'];
+// The person signed in; records are stamped with this name.
+const actor = { name: 'System' };
 
 const isWide = () => window.innerWidth >= 900;
 const nextCode = (list, prefix, width) => {
@@ -59,6 +66,11 @@ function initialState() {
     db,
   };
 }
+
+// Who is signed in on this browser, and when they last did something (for automatic sign-out).
+const SESSION_KEY = 'agbm.session';
+const readSession = () => { try { return JSON.parse(localStorage.getItem(SESSION_KEY)) || null; } catch { return null; } };
+const writeSession = (v) => { try { if (v) localStorage.setItem(SESSION_KEY, JSON.stringify(v)); else localStorage.removeItem(SESSION_KEY); } catch { /* storage blocked */ } };
 
 // Routes live under "#/…"; other hashes (e.g. the sign-in page's #help) are in-page anchors and keep the current view.
 const routeOf = (hash) => (hash === '#/profile' ? 'profile' : hash === '#/login' ? 'login' : 'app');
@@ -81,7 +93,53 @@ function useHashRoute() {
 export default function App() {
   const route = useHashRoute();
   const [s, setS] = useState(initialState);
-  const set = useCallback((patch) => setS((prev) => ({ ...prev, ...(typeof patch === 'function' ? patch(prev) : patch) })), []);
+  const sRef = useRef(s);
+  sRef.current = s;
+  const meRef = useRef(null);
+  const bypass = useRef(false);
+  const lastBlock = useRef(0);
+  const [session, setSession] = useState(readSession);
+  const [lockReason, setLockReason] = useState('');
+  const devId = useMemo(deviceId, []);
+
+  // Every change to the books goes through here: it is checked against the signed-in person's rights,
+  // recorded in the activity log, sent to the owner for approval, or refused.
+  // Returns true when the change was applied.
+  const set = useCallback((patch) => {
+    const prev = sRef.current;
+    const part = typeof patch === 'function' ? patch(prev) : patch;
+    if (!part) return true;
+    let out = part;
+    let applied = true;
+    if (part.db && part.db !== prev.db && !bypass.current) {
+      const ops = diffDb(prev.db, part.db);
+      if (ops.length) {
+        const me = meRef.current;
+        const keys = tasksFor(ops, TODAY);
+        const level = strictest(me, keys);
+        const label = describe(ops);
+        const at = new Date().toISOString();
+        if (level === 'deny') {
+          lastBlock.current = Date.now();
+          out = { toast: 'Not allowed: ' + keys.filter((k) => levelOf(me, k) === 'deny').map(taskLabel).join(', ') + '. Ask the owner for this right.' };
+          applied = false;
+        } else if (level === 'approve') {
+          lastBlock.current = Date.now();
+          const req = { id: 'AP' + Date.now(), at, userId: me.id, userName: me.name, keys, label, ops, status: 'pending' };
+          out = { ...part, db: { ...prev.db, approvals: (prev.db.approvals || []).concat([req]) }, toast: 'Sent to the owner for approval — ' + label + '.' };
+          applied = false;
+        } else {
+          const entry = { id: 'AU' + Date.now() + Math.random().toString(36).slice(2, 6), at, userId: me ? me.id : '', userName: me ? me.name : 'System', keys, label, ops };
+          out = { ...part, db: { ...part.db, audit: (part.db.audit || []).concat([entry]) } };
+        }
+      }
+    }
+    sRef.current = { ...prev, ...out };
+    setS((st) => ({ ...st, ...out }));
+    return applied;
+  }, []);
+  // Owner / system changes that are not checked (sign-in, devices, approvals, undo).
+  const setRaw = (patch) => { bypass.current = true; try { set(patch); } finally { bypass.current = false; } };
   const d = useMemo(() => createDomain(s.db), [s.db]);
   const P = useMemo(() => createPeople(s.db), [s.db]);
   const toastTimer = useRef(null);
@@ -119,12 +177,145 @@ export default function App() {
   }, [s.db, s.seq]);
 
   const toast = (msg) => {
-    clearTimeout(toastTimer.current);
+    if (Date.now() - lastBlock.current < 600) return;
     set({ toast: msg });
-    toastTimer.current = setTimeout(() => set({ toast: null }), 2800);
+  };
+  useEffect(() => {
+    if (!s.toast) return undefined;
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setS((st) => ({ ...st, toast: null })), Date.now() - lastBlock.current < 4000 ? 4500 : 2800);
+    return () => clearTimeout(toastTimer.current);
+  }, [s.toast]);
+
+  const users = s.db.users || [];
+  const me = session ? users.find((u) => u.id === session.userId && u.active !== false) || null : null;
+  meRef.current = me;
+  actor.name = me ? me.name : 'System';
+  const thisDevice = (s.db.devices || []).find((x) => x.id === devId);
+  const idleMinutes = me ? (+((s.db.settings || {})[me.role === 'owner' ? 'idleOwner' : 'idleStaff']) || (me.role === 'owner' ? 60 : 15)) : 15;
+
+  const signOut = (reason) => { writeSession(null); setSession(null); setLockReason(reason || ''); set({ mod: 'dashboard', modal: null, payEdit: null }); };
+  useEffect(() => {
+    if (!me) return undefined;
+    const touch = () => { const now = Date.now(); const cur = readSession(); if (cur && now - (cur.lastActive || 0) > 15000) writeSession({ ...cur, lastActive: now }); };
+    const evs = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+    evs.forEach((e) => window.addEventListener(e, touch, { passive: true }));
+    const tick = setInterval(() => {
+      const cur = readSession();
+      if (cur && Date.now() - (cur.lastActive || 0) > idleMinutes * 60000) signOut('Signed out after ' + idleMinutes + ' minutes without use.');
+    }, 20000);
+    return () => { evs.forEach((e) => window.removeEventListener(e, touch)); clearInterval(tick); };
+  }, [me && me.id, idleMinutes]);
+
+  const verify = async (u, secret) => !!u && (await hashSecret(secret, u.salt)) === u.secretHash;
+  const startSession = (u) => {
+    const v = { userId: u.id, lastActive: Date.now() };
+    writeSession(v); setSession(v); setLockReason('');
+    const at = new Date().toISOString();
+    setRaw((st) => ({
+      db: {
+        ...st.db,
+        users: (st.db.users || []).map((x) => (x.id === u.id ? { ...x, lastSignIn: at } : x)),
+        devices: (st.db.devices || []).map((x) => (x.id === devId ? { ...x, lastUsed: at } : x)),
+      },
+    }));
+  };
+  const createOwner = async (name, password) => {
+    const salt = newSalt();
+    const owner = { id: 'U' + Date.now(), name, phone: '', role: 'owner', salt, secretHash: await hashSecret(password, salt), active: true, perms: {} };
+    const at = new Date().toISOString();
+    setRaw((st) => ({ db: { ...st.db, users: [owner], devices: [{ id: devId, name: deviceGuess(), status: 'approved', requestedAt: at, approvedAt: at, approvedBy: name }] } }));
+    startSession(owner);
+  };
+  const signIn = async (id, secret) => {
+    const u = users.find((x) => x.id === id);
+    if (!(await verify(u, secret))) return false;
+    startSession(u);
+    return true;
+  };
+  const upsertDevice = (patch) => setRaw((st) => {
+    const list = st.db.devices || [];
+    const was = list.find((x) => x.id === devId);
+    return { db: { ...st.db, devices: was ? list.map((x) => (x.id === devId ? { ...x, ...patch } : x)) : list.concat([{ id: devId, requestedAt: new Date().toISOString(), ...patch }]) } };
+  });
+  const requestDevice = (name) => upsertDevice({ name, status: 'pending' });
+  const ownerApproveDevice = async (password, name) => {
+    const owners = users.filter((u) => u.role === 'owner');
+    for (const o of owners) {
+      // eslint-disable-next-line no-await-in-loop
+      if (await verify(o, password)) {
+        upsertDevice({ name, status: 'approved', approvedAt: new Date().toISOString(), approvedBy: o.name });
+        return true;
+      }
+    }
+    return false;
+  };
+  const setDeviceStatus = (id, status) => setRaw((st) => ({
+    db: { ...st.db, devices: (st.db.devices || []).map((x) => (x.id === id ? { ...x, status, ...(status === 'approved' ? { approvedAt: new Date().toISOString(), approvedBy: me.name } : {}) } : x)) },
+  }));
+  const saveUser = async (u, pin) => {
+    const id = u.id || 'U' + Date.now();
+    let rec = { ...u, id };
+    if (pin) { const salt = newSalt(); rec = { ...rec, salt, secretHash: await hashSecret(pin, salt) }; }
+    setRaw((st) => {
+      const list = st.db.users || [];
+      return { db: { ...st.db, users: list.some((x) => x.id === id) ? list.map((x) => (x.id === id ? { ...x, ...rec } : x)) : list.concat([rec]) } };
+    });
+    toast((u.id ? 'Saved ' : 'Added ') + rec.name + '.');
+    return id;
+  };
+  const saveAccessSettings = (patch) => setRaw((st) => ({ db: { ...st.db, settings: { ...(st.db.settings || {}), ...patch } } }));
+
+  // Owner decides a held change: approving applies it now, recorded as done by the staff member.
+  const decideApproval = (id, yes) => {
+    const req = (s.db.approvals || []).find((a) => a.id === id);
+    if (!req || req.status !== 'pending') return;
+    const at = new Date().toISOString();
+    setRaw((st) => {
+      const approvals = (st.db.approvals || []).map((a) => (a.id === id ? { ...a, status: yes ? 'approved' : 'rejected', decidedBy: me.name, decidedAt: at } : a));
+      if (!yes) return { db: { ...st.db, approvals } };
+      const db = applyOps(st.db, req.ops);
+      const entry = { id: 'AU' + Date.now(), at, userId: req.userId, userName: req.userName, approvedBy: me.name, keys: req.keys, label: req.label, ops: req.ops };
+      return { db: { ...db, approvals, audit: (st.db.audit || []).concat([entry]) } };
+    });
+    toast((yes ? 'Approved: ' : 'Rejected: ') + req.label + '.');
   };
 
-  const go = (mod) => set({ mod, ...FILTERS_CLEAR, modal: null });
+  // Owner undoes chosen changes (newest first). Records changed by someone since are skipped.
+  const rollback = (ids) => {
+    const chosen = (s.db.audit || []).filter((a) => ids.includes(a.id) && !a.rolledBack).sort((a, b) => b.at.localeCompare(a.at));
+    if (!chosen.length) return;
+    const at = new Date().toISOString();
+    let db = s.db;
+    const removed = {};
+    let skipped = 0;
+    chosen.forEach((a) => {
+      a.ops.slice().reverse().forEach((o) => {
+        if (conflicts(db, [o], true).length) { skipped += 1; return; }
+        if (o.op === 'add') {
+          db = applyOps(db, [{ coll: o.coll, op: 'del', id: o.id }]);
+          if (o.coll !== 'voided') (removed[o.coll] = removed[o.coll] || []).push(o.after);
+        } else if (o.op === 'del') db = applyOps(db, [{ coll: o.coll, op: 'add', id: o.id, after: o.before }]);
+        else if (o.op === 'upd') db = applyOps(db, [{ coll: o.coll, op: 'upd', id: o.id, after: o.before }]);
+        else db = applyOps(db, [{ coll: o.coll, op: 'set', after: o.before }]);
+      });
+    });
+    const who = [...new Set(chosen.map((a) => a.userName))].join(', ');
+    if (Object.keys(removed).length) {
+      const count = Object.values(removed).reduce((n, l) => n + l.length, 0);
+      db = { ...db, voided: [{ id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: me.name, reason: 'Undone by owner — work of ' + who, kind: 'Undo', label: count + ' item(s) added by ' + who, amount: null, records: removed }].concat(db.voided || []) };
+    }
+    const ops = diffDb(s.db, db);
+    const entry = { id: 'AU' + Date.now(), at, userId: me.id, userName: me.name, keys: [], label: 'Undid ' + chosen.length + ' change(s) by ' + who, ops, rollback: true };
+    const audit = (db.audit || []).map((a) => (ids.includes(a.id) ? { ...a, rolledBack: { at, by: me.name } } : a)).concat([entry]);
+    setRaw({ db: { ...db, audit } });
+    toast('Undid ' + chosen.length + ' change(s) by ' + who + (skipped ? ' — ' + skipped + ' record(s) skipped because they were changed since.' : '.'));
+  };
+
+  const go = (mod) => {
+    if (!canOpen(meRef.current, mod)) { toast('You do not have access to that page.'); return; }
+    set({ mod, ...FILTERS_CLEAR, modal: null });
+  };
   const setWb = (patch) => set((st) => ({ wb: { ...st.wb, ...patch } }));
   const closeModal = () => set({ modal: null, errors: {} });
 
@@ -216,7 +407,7 @@ export default function App() {
       return;
     }
     const ticket = { ...pe.ticket, method: methodOf(pay), roundOff: result.roundOff, payRemarks: String(pay.remarks || '').trim() };
-    const recs = toRecords(pay, ticket, SIGNED_IN_AS);
+    const recs = toRecords(pay, ticket, actor.name);
     set((st) => {
       const others = st.db.payments.filter((p) => p.ticketId !== ticket.id);
       const exists = st.db.orders.some((o) => o.id === ticket.id);
@@ -349,10 +540,10 @@ export default function App() {
         id: 'O' + Date.now() + '-' + i, ticket: r.serial, serial: r.serial, date: r.date, time: r.time, custId: r.custId, walkIn: r.custId ? '' : r.walkIn,
         matId: r.matId, matName: r.matName, vehicle: r.vehicle, dir: 'OUT', tare: r.gross - r.net, gross: r.gross, manualRate,
         method: methodOf(r.pay), roundOff: result.roundOff, payRemarks: String(r.pay.remarks || '').trim(), regAmount: r.amount, batchId: r.batchId,
-        status: 'Completed', reason: '', remarks: r.remarks || '', by: SIGNED_IN_AS,
+        status: 'Completed', reason: '', remarks: r.remarks || '', by: actor.name,
       };
       orders.push(o);
-      payments.push(...toRecords(r.pay, o, SIGNED_IN_AS).map((p, j) => ({ ...p, id: p.id + '-' + i + '-' + j })));
+      payments.push(...toRecords(r.pay, o, actor.name).map((p, j) => ({ ...p, id: p.id + '-' + i + '-' + j })));
       credit += result.credit;
       paid += result.paid;
     });
@@ -369,7 +560,7 @@ export default function App() {
     const recs = ready.map((r, i) => ({
       id: 'U' + Date.now() + '-' + i, serial: r.serial, date: r.date, time: r.time, supplierId: r.supplierId, regName: r.name,
       // Soling trucks come in loaded: the register's Gross column is the empty truck, its Net column the loaded weight.
-      vehicle: r.vehicle, tare: r.gross, gross: r.net, manualRate: r.manualRate || '', extra: r.extra || '', batchId: r.batchId, remarks: r.remarks || '', by: SIGNED_IN_AS,
+      vehicle: r.vehicle, tare: r.gross, gross: r.net, manualRate: r.manualRate || '', extra: r.extra || '', batchId: r.batchId, remarks: r.remarks || '', by: actor.name,
     }));
     const keys = new Set(ready.map((r) => r.key));
     set((st) => ({ db: { ...st.db, purchases: recs.concat(st.db.purchases), staging: st.db.staging.filter((r) => !keys.has(r.key)) } }));
@@ -421,7 +612,7 @@ export default function App() {
     if (!(amt > 0)) errs.amount = 'Enter an amount greater than zero.';
     if (!f.date) errs.date = 'Required.';
     if (Object.keys(errs).length) { set({ errors: errs }); return; }
-    const rec = { id: 'KP' + Date.now(), creditorId: c.id, date: f.date, time: f.time || hhmm(), method: f.method, amount: amt, ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: SIGNED_IN_AS };
+    const rec = { id: 'KP' + Date.now(), creditorId: c.id, date: f.date, time: f.time || hhmm(), method: f.method, amount: amt, ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: actor.name };
     set((st) => ({ db: { ...st.db, crPayments: (st.db.crPayments || []).concat([rec]) }, modal: null }));
     const left = d.crOwed(c) - amt;
     toast(M(amt) + ' paid to ' + c.name + '. ' + (left < -0.5 ? M(-left) + ' paid ahead.' : 'Still owed ' + M(Math.max(0, left)) + '.'));
@@ -500,7 +691,7 @@ export default function App() {
         const was = old.find((a) => a.empId === r.emp.id);
         return {
           id: was ? was.id : 'A' + Date.now() + '-' + i, date, empId: r.emp.id, status: r.status,
-          wage: was ? was.wage : +r.emp.wage || 0, remarks: String(r.remarks || '').trim(), by: SIGNED_IN_AS,
+          wage: was ? was.wage : +r.emp.wage || 0, remarks: String(r.remarks || '').trim(), by: actor.name,
         };
       });
       return { db: { ...st.db, attendance: others.concat(marked) } };
@@ -523,7 +714,7 @@ export default function App() {
     const v = P.settle(line, recover);
     return {
       id: 'W' + Date.now() + '-' + line.emp.id, weekEnd: line.weekEnd, empId: line.emp.id, worked: line.worked, earned: line.earned,
-      cutWeek: v.cutWeek, cutOld: v.cutOld, net: v.net, by: SIGNED_IN_AS, remarks: '', ...extra,
+      cutWeek: v.cutWeek, cutOld: v.cutOld, net: v.net, by: actor.name, remarks: '', ...extra,
     };
   };
   const payDate = (weekEnd) => (isoDate() < weekEnd ? isoDate() : weekEnd);
@@ -556,7 +747,7 @@ export default function App() {
     set((st) => {
       const list = st.db.ebReadings || [];
       const was = list.find((r) => r.date === rec.date);
-      const next = was ? list.map((r) => (r.date === rec.date ? { ...r, ...rec, by: SIGNED_IN_AS } : r)) : list.concat([{ id: 'EB' + Date.now(), ...rec, by: SIGNED_IN_AS }]);
+      const next = was ? list.map((r) => (r.date === rec.date ? { ...r, ...rec, by: actor.name } : r)) : list.concat([{ id: 'EB' + Date.now(), ...rec, by: actor.name }]);
       return { db: { ...st.db, ebReadings: next } };
     });
     toast('EB reading for ' + rec.date + ' saved — ' + rec.units + ' kWh' + (rec.pf ? ', PF ' + rec.pf : '') + '.');
@@ -565,7 +756,7 @@ export default function App() {
     set((st) => {
       const list = st.db.ebBills || [];
       const was = list.find((b) => b.month === rec.month);
-      const next = was ? list.map((b) => (b.month === rec.month ? { ...b, ...rec, by: SIGNED_IN_AS } : b)) : list.concat([{ id: 'EBB' + Date.now(), ...rec, by: SIGNED_IN_AS }]);
+      const next = was ? list.map((b) => (b.month === rec.month ? { ...b, ...rec, by: actor.name } : b)) : list.concat([{ id: 'EBB' + Date.now(), ...rec, by: actor.name }]);
       return { db: { ...st.db, ebBills: next } };
     });
     toast('Month-end electricity for ' + rec.month + ' saved.');
@@ -588,12 +779,13 @@ export default function App() {
     form: { confirm: '' }, errors: {},
   });
   const startFresh = () => {
+    if (!me || me.role !== 'owner') { toast('Only the owner can start fresh.'); return; }
     if (String(s.form.confirm || '').trim().toUpperCase() !== 'START') { set({ errors: { confirm: 'Type START to confirm.' } }); return; }
     set((st) => ({
       db: {
         ...st.db,
         orders: [], payments: [], staging: [], imports: [], purchases: [], supPayments: [], solPasses: [], solRates: [], voided: [], onsite: [],
-        employees: [], attendance: [], advances: [], payroll: [], expenses: [], creditors: [], crBills: [], crPayments: [], ebReadings: [], ebBills: [],
+        employees: [], attendance: [], advances: [], payroll: [], expenses: [], creditors: [], crBills: [], crPayments: [], ebReadings: [], ebBills: [], audit: [], approvals: [],
         settings: { cashStart: 0, bankStart: 0, startDate: '' },
         customers: st.db.customers.map((c) => ({ ...c, received: 0, last: '—' })),
       },
@@ -651,7 +843,7 @@ export default function App() {
     if (Object.keys(errs).length) { set({ errors: errs }); return; }
     const rec = {
       id: 'Z' + Date.now(), date: f.date, time: f.time || hhmm(), supplierId: p.id, method: f.method, amount: amt,
-      ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: SIGNED_IN_AS,
+      ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: actor.name,
     };
     set((st) => ({ db: { ...st.db, supPayments: (st.db.supPayments || []).concat([rec]) }, modal: null }));
     const left = d.owed(p) - amt;
@@ -680,7 +872,7 @@ export default function App() {
     const rec = { supplierId: m.supplierId, amount: amt, date: f.date, time: f.time || hhmm(), loadIds: f.loadIds || [], remarks: String(f.remarks || '').trim() };
     set((st) => {
       const list = st.db.solPasses || [];
-      const next = m.id ? list.map((x) => (x.id === m.id ? { ...x, ...rec } : x)) : list.concat([{ id: 'PS' + Date.now(), ...rec, by: SIGNED_IN_AS }]);
+      const next = m.id ? list.map((x) => (x.id === m.id ? { ...x, ...rec } : x)) : list.concat([{ id: 'PS' + Date.now(), ...rec, by: actor.name }]);
       return { db: { ...st.db, solPasses: next }, modal: null };
     });
     toast('Pass amount ' + M(amt) + (rec.loadIds.length ? ' for ' + rec.loadIds.length + ' load(s)' : '') + ' ' + (m.id ? 'updated' : 'added to what we owe ' + d.supplier(m.supplierId).name) + '.');
@@ -699,7 +891,7 @@ export default function App() {
     const rec = { custId: '', matId: 'SOL', rate: +f.rate, from: f.from, to: f.to || '' };
     const plan = planRate(own, rec);
     if (plan.errors) { set({ errors: plan.errors }); return; }
-    const card = { id: 'SR' + Date.now(), supplierId: id, rate: rec.rate, from: rec.from, to: rec.to, remarks: String(f.remarks || '').trim(), by: SIGNED_IN_AS };
+    const card = { id: 'SR' + Date.now(), supplierId: id, rate: rec.rate, from: rec.from, to: rec.to, remarks: String(f.remarks || '').trim(), by: actor.name };
     set((st) => ({
       db: {
         ...st.db,
@@ -779,7 +971,7 @@ export default function App() {
 
   const doDelete = () => {
     const { key, row } = s.modal;
-    const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: String(s.form.reason || '').trim(), ...voidEntryFor(key, row) };
+    const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: actor.name, reason: String(s.form.reason || '').trim(), ...voidEntryFor(key, row) };
     const drop = (list, items, idKey) => list.filter((x) => !items.some((y) => y[idKey] === x[idKey]));
     set((st) => {
       const db = { ...st.db, voided: [entry].concat(st.db.voided || []) };
@@ -788,6 +980,15 @@ export default function App() {
       return { db, modal: null, ...(key === 'customers' && st.mod === 'party' ? { mod: 'customers' } : key === 'suppliers' && st.mod === 'supplier' ? { mod: 'suppliers' } : key === 'creditors' && st.mod === 'creditor' ? { mod: row.kind === 'bunk' ? 'bunks' : 'vendors' } : {}) };
     });
     toast(entry.kind + ' moved to Voided entries.');
+  };
+
+  const askPurge = (entry) => set({
+    modal: { kind: 'purgeVoided', entry, title: 'Delete permanently?', kicker: entry.kind, confirmLabel: 'Delete permanently', message: entry.label + ' will be deleted for good and cannot be restored.' },
+  });
+  const purgeVoided = () => {
+    const { entry } = s.modal;
+    const ok = set((st) => ({ db: { ...st.db, voided: (st.db.voided || []).filter((e) => e.id !== entry.id) }, modal: null }));
+    if (ok) toast('Deleted permanently.');
   };
 
   const restoreEntry = (entry) => {
@@ -873,7 +1074,7 @@ export default function App() {
     const rec = { custId: m.custId, matId: f.matId, rate: +f.rate, from: f.from, to: f.to || '', remarks: String(f.remarks || '').trim() };
     const plan = planRate(s.db.rates, rec);
     if (plan.errors) { set({ errors: plan.errors }); return; }
-    const card = { id: 'R' + Date.now(), ...rec, by: SIGNED_IN_AS };
+    const card = { id: 'R' + Date.now(), ...rec, by: actor.name };
     set((st) => ({
       db: {
         ...st.db,
@@ -935,7 +1136,7 @@ export default function App() {
       id: 'YR' + Date.now(), date: f.date, time: f.time || hhmm(), ticketId: '', custId: c.id, walkIn: '',
       method: f.method, amount: amt, toType: toSupplier ? 'supplier' : toCreditor ? 'creditor' : f.to,
       supplierId: toSupplier ? f.to.slice(2) : '', creditorId: toCreditor ? f.to.slice(2) : '',
-      toName: f.to === 'other' ? String(f.toName).trim() : '', ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: SIGNED_IN_AS,
+      toName: f.to === 'other' ? String(f.toName).trim() : '', ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: actor.name,
     };
     set((st) => ({ db: { ...st.db, payments: st.db.payments.concat([rec]) }, modal: null }));
     toast(M(amt) + ' received from ' + c.name + ' by ' + METHOD_LABEL[f.method] + ' → ' + paidToLabel(rec, (id) => d.supplier(id).name, d.creditorName) + '.');
@@ -954,22 +1155,23 @@ export default function App() {
     NUMERIC_FIELDS.forEach((k) => { if (rec[k] !== undefined && rec[k] !== '') rec[k] = +rec[k]; });
     // A new manual order is saved on credit, then the payment dialog opens so staff record how it was paid.
     const newOrder = c.key === 'orders' && !m.id
-      ? { id: 'N' + Date.now(), ticket: 'WB-' + s.seq, dir: 'OUT', by: SIGNED_IN_AS, method: 'Credit', roundOff: 0, payRemarks: '', walkIn: '', ...rec, time: rec.time || hhmm() }
+      ? { id: 'N' + Date.now(), ticket: 'WB-' + s.seq, dir: 'OUT', by: actor.name, method: 'Credit', roundOff: 0, payRemarks: '', walkIn: '', ...rec, time: rec.time || hhmm() }
       : null;
     const editedOrder = c.key === 'orders' && m.id ? { ...s.db.orders.find((o) => o.id === m.id), ...rec } : null;
-    set((st) => {
+    const okSave = set((st) => {
       const list = st.db[c.key] || [];
       if (m.id) return { db: { ...st.db, [c.key]: list.map((r) => (r.id === m.id ? { ...r, ...rec } : r)) }, modal: null };
       if (newOrder) return { db: { ...st.db, orders: [newOrder].concat(list) }, modal: null, seq: st.seq + 1 };
       const extra = c.key === 'customers' ? { code: nextCode(list, 'CP-', 3), received: 0, last: '—' }
         : c.key === 'suppliers' ? { code: nextCode(list, 'SP-', 2) }
           : c.key === 'creditors' ? { code: nextCode(list.filter((x) => x.kind === c.defaults.kind), c.defaults.kind === 'bunk' ? 'FB-' : 'SC-', 2), ...c.defaults }
-          : c.key === 'crBills' ? { by: SIGNED_IN_AS }
-          : c.key === 'purchases' ? { batchId: '', by: SIGNED_IN_AS }
+          : c.key === 'crBills' ? { by: actor.name }
+          : c.key === 'purchases' ? { batchId: '', by: actor.name }
           : c.key === 'materials' ? { code: 'MT-' + String(list.length + 1).padStart(2, '0'), unit: 'Ton' }
             : c.key === 'employees' ? { code: 'EM-' + String(list.length + 1).padStart(2, '0') } : {};
       return { db: { ...st.db, [c.key]: [{ id: 'N' + Date.now(), ...extra, ...rec }].concat(list) }, modal: null };
     });
+    if (!okSave) return;
     if (newOrder && newOrder.status !== 'Void') {
       const bill = d.billTotal(newOrder);
       openPay({ source: 'ticket', ticket: newOrder, bill, walkIn: false, title: newOrder.ticket + ' — ' + d.cust(newOrder.custId).name, initial: defaultPay(bill, { walkIn: false, cashSerial: false }) });
@@ -1137,10 +1339,10 @@ export default function App() {
           ];
         })() : null,
       onConfirm: {
-        delete: doDelete, void: doVoid, receipt: postReceipt, startFresh, solPass: savePass, crPay: postCrPay, salary: saveSalary, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
+        delete: doDelete, void: doVoid, receipt: postReceipt, startFresh, purgeVoided, rollback: () => { const ids = s.modal.ids; set({ modal: null }); rollback(ids); }, solPass: savePass, crPay: postCrPay, salary: saveSalary, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
         clearStaging: () => {
           const rows = s.db.staging;
-          const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: SIGNED_IN_AS, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
+          const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: actor.name, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
           set((st) => ({ db: { ...st.db, staging: [], voided: [entry].concat(st.db.voided || []) }, modal: null }));
           toast('Pending rows moved to Voided entries.');
         },
@@ -1149,8 +1351,13 @@ export default function App() {
     };
   }
 
-  if (route === 'profile') return <Profile onSignOut={() => { window.location.hash = '#/login'; }} />;
-  if (route === 'login') return <Login onEnter={() => go('dashboard')} />;
+  if (!users.length) return <SetupOwner onCreate={createOwner} />;
+  if (!thisDevice || thisDevice.status !== 'approved') {
+    return <DeviceGate device={thisDevice} suggestedName={deviceGuess()} onRequest={requestDevice} onOwnerApprove={ownerApproveDevice} />;
+  }
+  if (!me) return <SignIn users={users} onSignIn={signIn} reason={lockReason} />;
+  if (route === 'profile') return <Profile onSignOut={() => { window.location.hash = ''; signOut(); }} />;
+  if (route === 'login') return <Login onEnter={() => { window.location.hash = ''; }} />;
 
   const meta = party
     ? { ...MODS.party, title: party.name, sub: [party.owner && 'Owner ' + party.owner, party.contact, party.address].filter(Boolean).join(' · ') || 'Credit party — add owner, contact and address with Edit details.' }
@@ -1165,7 +1372,7 @@ export default function App() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-body)', fontSize: 14, letterSpacing: '-0.011em' }}>
       <div style={s.wide ? { display: 'flex', alignItems: 'stretch', minHeight: '100vh' } : { display: 'block' }}>
-        <Sidebar wide={s.wide} mod={cr ? (cr.kind === 'bunk' ? 'bunks' : 'vendors') : (MODS[s.mod] && MODS[s.mod].navAs) || s.mod} onsiteCount={s.db.onsite.length} go={go} />
+        <Sidebar wide={s.wide} mod={cr ? (cr.kind === 'bunk' ? 'bunks' : 'vendors') : (MODS[s.mod] && MODS[s.mod].navAs) || s.mod} onsiteCount={s.db.onsite.length} go={go} canOpen={(k) => canOpen(me, k)} me={me} pendingApprovals={(s.db.approvals || []).filter((a) => a.status === 'pending' && (me.role === 'owner' || a.userId === me.id)).length} onSignOut={() => signOut()} />
 
         <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', containerType: 'inline-size', containerName: 'shell' }}>
           <Header
@@ -1182,9 +1389,20 @@ export default function App() {
             className="ag-main"
             style={{ padding: 'var(--space-6) var(--space-8) 72px', flex: '1 1 auto', minWidth: 0, containerType: 'inline-size', background: 'linear-gradient(180deg, #F8F4F4A9, #B0B0B0)' }}
           >
+            {!canOpen(me, s.mod) && (
+              <div className="ag-glass" style={{ padding: 'var(--space-6)' }}>
+                <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 16 }}>You do not have access to this page</div>
+                <div style={{ fontSize: 13, color: 'var(--color-neutral-700)', marginTop: 4 }}>Ask the owner to give you this right under Staff &amp; access.</div>
+              </div>
+            )}
+            {s.mod === 'access' && me.role === 'owner' && <Access db={s.db} me={me} thisDevice={devId} onSaveUser={saveUser} onDevice={setDeviceStatus} onSettings={saveAccessSettings} />}
+            {s.mod === 'activity' && me.role === 'owner' && <Activity db={s.db} onRollback={(ids) => set({ modal: { kind: 'rollback', ids, title: 'Undo ' + ids.length + ' change(s)?', kicker: 'Activity', confirmLabel: 'Undo', message: 'The selected changes will be reversed, newest first. Anything changed by someone since is skipped. Items removed by the undo are kept in Voided entries.' } })} />}
+            {s.mod === 'approvals' && <Approvals db={s.db} me={me} onDecide={decideApproval} />}
             {s.mod === 'dashboard' && <Dashboard d={d} tab={s.dashTab} setTab={(t) => set({ dashTab: t })} go={go} onOpenParty={openParty} onReport={(day) => openPageReport('daily', { fromDate: day, toDate: day })} />}
             {party && (
               <PartyDetail
+                showHistory={me.role === 'owner'}
+                onDeleteAccount={() => askDelete(party, 'customers')}
                 d={d}
                 party={party}
                 tab={s.partyTab}
@@ -1317,6 +1535,8 @@ export default function App() {
             {sup && (
               <SupplierDetail
                 key={sup.id}
+                showHistory={me.role === 'owner'}
+                onDeleteAccount={() => askDelete(sup, 'suppliers')}
                 d={d}
                 sup={sup}
                 tab={s.supplierTab}
@@ -1344,7 +1564,7 @@ export default function App() {
                 <button type="button" className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }} onClick={() => go('suppliers')}>All soling suppliers</button>
               </div>
             )}
-            {s.mod === 'voids' && <VoidedEntries d={d} onRestore={restoreEntry} onReinstate={reinstate} />}
+            {s.mod === 'voids' && <VoidedEntries d={d} onRestore={restoreEntry} onReinstate={reinstate} onPurge={askPurge} />}
             {cfg && !CUSTOM_LISTS.includes(s.mod) && (
               <ListModule
                 key={s.mod}

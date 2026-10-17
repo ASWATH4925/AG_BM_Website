@@ -3,7 +3,7 @@ import { OTHER_MATERIAL } from './domain';
 import { createPeople } from './people';
 import { M, N, T } from './format';
 
-export const NAV_GROUPS = ['Operations', 'Masters', 'Finance', 'People'];
+export const NAV_GROUPS = ['Operations', 'Masters', 'Finance', 'People', 'Owner'];
 
 export const MODS = {
   dashboard: { label: 'Dashboard', group: 'Operations', title: 'Operations overview', sub: 'Live position across the yard, the ledger and the payroll cycle.' },
@@ -31,6 +31,9 @@ export const MODS = {
   attendance: { label: 'Attendance', group: 'People', title: 'Attendance', sub: 'Mark every worker for the day — present, half day or absent — with remarks. Past days can be edited.' },
   advances: { label: 'Advances', group: 'People', title: 'Advances', sub: 'Money given to workers ahead of Saturday — taken back from their salary.' },
   payroll: { label: 'Weekly Salary', group: 'People', title: 'Weekly salary', sub: 'Saturday pay: days worked × daily wage, less this week’s advance and any older advance you recover.' },
+  approvals: { label: 'Approvals', group: 'Owner', title: 'Approvals', sub: 'Changes staff made that need the owner’s approval before they count.' },
+  activity: { label: 'Activity & Undo', group: 'Owner', title: 'Activity & undo', sub: 'Every change, who made it and when — and undo a staff member’s work over a period.' },
+  access: { label: 'Staff & Access', group: 'Owner', title: 'Staff & access', sub: 'Staff sign-ins and what each person may do, approved devices and automatic sign-out.' },
 };
 
 const opts = (a) => a.map((x) => ({ v: x, l: x }));

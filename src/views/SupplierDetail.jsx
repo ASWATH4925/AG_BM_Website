@@ -4,7 +4,9 @@ import StatTile from '../components/StatTile';
 import Tag from '../components/Tag';
 import { rateStatus } from '../lib/domain';
 import { isoDate, M, N, T } from '../lib/format';
+import { touches } from '../lib/access';
 import { METHOD_LABEL } from '../lib/payments';
+import { ChangeDetail } from './Activity';
 import { BackLink, Empty, Info, RangeBar, rangeStamps } from './PartyDetail';
 
 const TABS = ['Loads supplied', 'Passes', 'Payments made', 'Statement', 'Rates', 'Contact details'];
@@ -15,15 +17,17 @@ const methodName = (m) => METHOD_LABEL[m] || m;
 // One soling supplier's account: what they brought, what has been paid to them, and what we still owe.
 export default function SupplierDetail({
   d, sup, tab, setTab, onBack, onEdit, onAddLoad, onEditLoad, onDeleteLoad, onPay, onDeletePay, onOpenParty,
-  onAddRate, onEndRate, onDeleteRate, onReport, onAddPass, onEditPass, onDeletePass,
+  onAddRate, onEndRate, onDeleteRate, onReport, onAddPass, onEditPass, onDeletePass, showHistory, onDeleteAccount,
 }) {
+  const tabs = showHistory ? TABS.concat(['History']) : TABS;
+  const history = showHistory ? (d.db.audit || []).filter((a) => a.ops.some((o) => touches(o, { supplierId: sup.id }))).slice().sort((a, b) => b.at.localeCompare(a.at)) : [];
   const [range, setRange] = useState({ fromDate: '', fromTime: '', toDate: '', toTime: '' });
   const { from, to } = rangeStamps(range);
   const L = d.supLedger(sup.id, from, to);
   const loads = L.rows.filter((r) => r.kind === 'load').map((r) => r.u);
   const pays = L.rows.filter((r) => r.kind === 'pay');
   const sum = (list, f) => list.reduce((s, x) => s + f(x), 0);
-  const current = tab && TABS.includes(tab) ? tab : TABS[0];
+  const current = tab && tabs.includes(tab) ? tab : TABS[0];
   const owe = d.owed(sup);
   const allLoads = d.solLoadsOf(sup.id);
   const byParties = d.supplierPaysOf(sup.id).filter((x) => x.source === 'party');
@@ -61,7 +65,7 @@ export default function SupplierDetail({
       </div>
 
       <div role="tablist" aria-label="Account sections" style={{ display: 'flex', flexWrap: 'wrap', borderBottom: '1px solid rgba(32,30,29,.10)', margin: 'var(--space-6) 0' }}>
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t} type="button" role="tab" aria-selected={current === t} className="ag-tab" data-on={current === t ? '1' : '0'} onClick={() => setTab(t)}>
             {t}<i />
           </button>
@@ -283,6 +287,27 @@ export default function SupplierDetail({
         </div>
       )}
 
+
+      {current === 'History' && (
+        <Panel className="ag-rise" title="History" sub="Every change on this account — who made it and when">
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table" style={{ width: '100%', minWidth: 760 }}>
+              <thead><tr><th style={TH}>When</th><th style={TH}>Who</th><th style={TH}>What changed</th></tr></thead>
+              <tbody>
+                {history.map((a) => (
+                  <tr key={a.id}>
+                    <td className="ag-tabular" style={{ whiteSpace: 'nowrap' }}>{a.at.slice(0, 16).replace('T', ' ')}</td>
+                    <td style={{ fontWeight: 600 }}>{a.userName}{a.approvedBy ? <div style={{ fontWeight: 400, fontSize: 11.5, color: 'var(--color-neutral-600)' }}>approved by {a.approvedBy}</div> : null}{a.rolledBack ? <div style={{ fontWeight: 400, fontSize: 11.5, color: '#8a5207' }}>undone by {a.rolledBack.by}</div> : null}</td>
+                    <td style={{ whiteSpace: 'normal' }}><strong>{a.label}</strong><ChangeDetail ops={a.ops.filter((o) => touches(o, { supplierId: sup.id }))} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {history.length === 0 && <Empty>No changes recorded on this account yet.</Empty>}
+        </Panel>
+      )}
+
       {current === 'Rates' && (
         <Panel
           className="ag-rise"
@@ -327,7 +352,7 @@ export default function SupplierDetail({
       )}
 
       {current === 'Contact details' && (
-        <Panel className="ag-rise" title="Contact details" sub="Used on statements and for UPI payments" action={<button type="button" className="btn btn-secondary" onClick={onEdit}>Edit details</button>}>
+        <Panel className="ag-rise" title="Contact details" sub="Used on statements and for UPI payments" action={<div style={{ display: 'flex', gap: 'var(--space-2)' }}><button type="button" className="btn btn-secondary" onClick={onEdit}>Edit details</button><button type="button" className="btn btn-ghost" onClick={onDeleteAccount}>Delete account</button></div>}>
           <div style={{ padding: 'var(--space-6)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(220px,100%),1fr))', gap: 'var(--space-6)' }}>
             <Info label="Supplier name" value={sup.name} />
             <Info label="Owner" value={sup.owner} />

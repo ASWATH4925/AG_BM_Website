@@ -3,17 +3,19 @@ import { brandMark } from '../lib/format';
 import { MODS, NAV_GROUPS } from '../lib/modules';
 import { ChevronRight, LogOut } from './Icons';
 
-export default function Sidebar({ wide, mod, onsiteCount, go }) {
-  const keys = Object.keys(MODS).filter((k) => !MODS[k].hidden);
+export default function Sidebar({ wide, mod, onsiteCount, go, canOpen = () => true, me, pendingApprovals = 0, onSignOut }) {
+  // Only the pages the signed-in person may open.
+  const keys = Object.keys(MODS).filter((k) => !MODS[k].hidden && canOpen(k));
 
   if (!wide) {
     return (
       <nav className="ag-side" data-narrow="1" aria-label="Modules" style={{ background: 'linear-gradient(180deg, #F8F4F4, #B0B0B0)' }}>
         {keys.map((k) => (
           <button key={k} type="button" className="ag-chip" aria-current={k === mod ? 'page' : undefined} onClick={() => go(k)}>
-            {MODS[k].label}
+            {MODS[k].label}{k === 'approvals' && pendingApprovals ? ' (' + pendingApprovals + ')' : ''}
           </button>
         ))}
+        <button type="button" className="ag-chip" onClick={onSignOut}>Sign out{me ? ' · ' + me.name : ''}</button>
       </nav>
     );
   }
@@ -42,18 +44,18 @@ export default function Sidebar({ wide, mod, onsiteCount, go }) {
       </div>
 
       <nav style={{ padding: 'var(--space-3) 0' }} aria-label="Modules">
-        {NAV_GROUPS.map((g) => (
+        {NAV_GROUPS.filter((g) => keys.some((k) => MODS[k].group === g)).map((g) => (
           <div key={g}>
             <div style={{ padding: 'var(--space-3) var(--space-4) var(--space-1)' }}>
               <div className="ag-kicker">{g}</div>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {keys.filter((k) => MODS[k].group === g).map((k) => {
-                const badge = k === 'weighbridge' && onsiteCount ? onsiteCount : null;
+                const badge = k === 'weighbridge' && onsiteCount ? onsiteCount : k === 'approvals' && pendingApprovals ? pendingApprovals : null;
                 return (
                   <button key={k} type="button" className="ag-navitem" aria-current={k === mod ? 'page' : undefined} onClick={() => go(k)}>
                     <span style={{ flex: '1 1 auto', textAlign: 'left' }}>{MODS[k].label}</span>
-                    {badge && <span className="ag-badge" aria-label={badge + ' vehicles on the bridge'}>{badge}</span>}
+                    {badge && <span className="ag-badge" aria-label={badge + (k === 'approvals' ? ' waiting' : ' vehicles on the bridge')}>{badge}</span>}
                   </button>
                 );
               })}
@@ -75,18 +77,18 @@ export default function Sidebar({ wide, mod, onsiteCount, go }) {
             <Avatar />
             <span style={{ flex: '1 1 auto', minWidth: 0 }}>
               <span style={{ display: 'block', fontSize: 13, fontWeight: 700, letterSpacing: '-0.015em', color: 'var(--color-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                A. Gopalakrishnan
+                {me ? me.name : '—'}
               </span>
               <span style={{ display: 'block', fontSize: 11.5, color: 'var(--color-neutral-700)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                Owner · full access
+                {me && me.role === 'owner' ? 'Owner · full access' : 'Staff'}
               </span>
             </span>
             <ChevronRight style={{ flex: '0 0 15px', color: 'var(--color-neutral-600)' }} />
           </a>
-          <a className="ag-out" href="#/login">
+          <button type="button" className="ag-out" onClick={onSignOut} style={{ width: '100%', background: 'none', border: 0, font: 'inherit', cursor: 'pointer' }}>
             <LogOut style={{ flex: '0 0 14px' }} />
-            Log out
-          </a>
+            Sign out
+          </button>
         </div>
       </div>
     </aside>
