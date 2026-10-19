@@ -188,7 +188,7 @@ export function peopleSeed() {
 
 // Fills in collections added after a browser first saved its data, so older saves keep working.
 export function upgradeDb(saved) {
-  const db = { payments: [], purchases: [], staging: [], imports: [], suppliers: [], voided: [], supPayments: [], users: [], devices: [], approvals: [], audit: [], ...saved };
+  const db = { payments: [], purchases: [], staging: [], imports: [], suppliers: [], voided: [], supPayments: [], users: [], devices: [], approvals: [], audit: [], accessRequests: [], ...saved };
   if (!db.solRates) db.solRates = JSON.parse(JSON.stringify(solRates));
   db.purchases = db.purchases.map(normalSoling);
   // Saves from before daily wages held demo monthly salaries; start them on the daily-wage sample instead.

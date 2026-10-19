@@ -14,11 +14,11 @@ import { createDomain, OTHER_MATERIAL, periodLabel, planRate } from './lib/domai
 import { hhmm, isoDate, M, N, T } from './lib/format';
 import { onEnterKey } from './lib/enterNav';
 import {
-  applyOps, canOpen, conflicts, describe, deviceGuess, deviceId, diffDb, hashSecret, levelOf, newSalt, strictest, taskLabel, tasksFor,
+  applyOps, canOpen, conflicts, describe, deviceGuess, deviceId, diffDb, hashSecret, levelOf, newSalt, strictest, taskLabel, tasksFor, TEMPLATES,
 } from './lib/access';
 import Access from './views/Access';
 import Activity, { Approvals } from './views/Activity';
-import { DeviceGate, SetupOwner, SignIn } from './views/Lock';
+import { DeviceGate, SetupOwner } from './views/Lock';
 import { MODS, moduleConfig } from './lib/modules';
 import { loadSaved, save as saveToBrowser } from './lib/storage';
 import CreditParties from './views/CreditParties';
@@ -72,8 +72,8 @@ const SESSION_KEY = 'agbm.session';
 const readSession = () => { try { return JSON.parse(localStorage.getItem(SESSION_KEY)) || null; } catch { return null; } };
 const writeSession = (v) => { try { if (v) localStorage.setItem(SESSION_KEY, JSON.stringify(v)); else localStorage.removeItem(SESSION_KEY); } catch { /* storage blocked */ } };
 
-// Routes live under "#/…"; other hashes (e.g. the sign-in page's #help) are in-page anchors and keep the current view.
-const routeOf = (hash) => (hash === '#/profile' ? 'profile' : hash === '#/login' ? 'login' : 'app');
+// Routes live under "#/…"; other hashes are in-page anchors and keep the current view.
+const routeOf = (hash) => (hash === '#/profile' ? 'profile' : 'app');
 
 function useHashRoute() {
   const [route, setRoute] = useState(() => routeOf(window.location.hash));
@@ -263,6 +263,34 @@ export default function App() {
     });
     toast((u.id ? 'Saved ' : 'Added ') + rec.name + '.');
     return id;
+  };
+  // A new person asks for a sign-in from the sign-in screen. The PIN is stored only as a salted hash.
+  const requestAccess = async ({ name, phone, template, pin }) => {
+    const salt = newSalt();
+    const req = {
+      id: 'AR' + Date.now(), ref: 'REQ-' + String(Date.now()).slice(-5), name, phone, template, salt, secretHash: await hashSecret(pin, salt),
+      deviceId: devId, deviceName: thisDevice ? thisDevice.name : deviceGuess(), at: new Date().toISOString(), status: 'pending',
+    };
+    setRaw((st) => ({ db: { ...st.db, accessRequests: (st.db.accessRequests || []).concat([req]) } }));
+    return req;
+  };
+  // Owner approves (adds the person as staff with the rights template they asked for) or declines a request.
+  const decideAccessRequest = (id, yes) => {
+    const req = (s.db.accessRequests || []).find((r) => r.id === id);
+    if (!req || req.status !== 'pending') return;
+    const at = new Date().toISOString();
+    const taken = users.some((u) => u.name.trim().toLowerCase() === req.name.trim().toLowerCase());
+    if (yes && taken) { toast('Someone already signs in as ' + req.name + '. Decline this request or rename that person first.'); return; }
+    setRaw((st) => {
+      const accessRequests = (st.db.accessRequests || []).map((r) => (r.id === id ? { ...r, status: yes ? 'approved' : 'declined', decidedBy: me.name, decidedAt: at } : r));
+      if (!yes) return { db: { ...st.db, accessRequests } };
+      const user = {
+        id: 'U' + Date.now(), name: req.name, phone: req.phone, role: 'staff', template: req.template, active: true,
+        perms: { ...(TEMPLATES[req.template] || TEMPLATES.viewer).perms }, salt: req.salt, secretHash: req.secretHash,
+      };
+      return { db: { ...st.db, accessRequests, users: (st.db.users || []).concat([user]) } };
+    });
+    toast(yes ? 'Approved ' + req.name + '. They can sign in now.' : 'Declined the request from ' + req.name + '.');
   };
   const saveAccessSettings = (patch) => setRaw((st) => ({ db: { ...st.db, settings: { ...(st.db.settings || {}), ...patch } } }));
 
@@ -1355,9 +1383,29 @@ export default function App() {
   if (!thisDevice || thisDevice.status !== 'approved') {
     return <DeviceGate device={thisDevice} suggestedName={deviceGuess()} onRequest={requestDevice} onOwnerApprove={ownerApproveDevice} />;
   }
-  if (!me) return <SignIn users={users} onSignIn={signIn} reason={lockReason} />;
+  if (!me) {
+    const done = s.db.orders.filter((o) => o.status !== 'Void' && o.date === TODAY);
+    const last = done.slice().sort((a, b) => String(b.time || '').localeCompare(String(a.time || '')))[0];
+    return (
+      <Login
+        users={users}
+        requests={s.db.accessRequests || []}
+        onSignIn={signIn}
+        onRequestAccess={requestAccess}
+        reason={lockReason}
+        deviceName={thisDevice.name}
+        scaleKg={s.scale}
+        scaleStable={Math.abs(s.scale - s.target) < 40}
+        lastTicket={last ? { ticket: last.ticket, time: last.time, vehicle: last.vehicle, material: d.matLabel(last), gross: last.gross || 0, tare: last.tare || 0 } : null}
+        stats={[
+          { value: T(done.reduce((a, o) => a + d.net(o), 0)) + ' t', label: 'Weighed today' },
+          { value: N(done.length), label: 'Tickets today' },
+          { value: N(s.db.onsite.length), label: 'On site now' },
+        ]}
+      />
+    );
+  }
   if (route === 'profile') return <Profile onSignOut={() => { window.location.hash = ''; signOut(); }} />;
-  if (route === 'login') return <Login onEnter={() => { window.location.hash = ''; }} />;
 
   const meta = party
     ? { ...MODS.party, title: party.name, sub: [party.owner && 'Owner ' + party.owner, party.contact, party.address].filter(Boolean).join(' · ') || 'Credit party — add owner, contact and address with Edit details.' }
@@ -1395,7 +1443,7 @@ export default function App() {
                 <div style={{ fontSize: 13, color: 'var(--color-neutral-700)', marginTop: 4 }}>Ask the owner to give you this right under Staff &amp; access.</div>
               </div>
             )}
-            {s.mod === 'access' && me.role === 'owner' && <Access db={s.db} me={me} thisDevice={devId} onSaveUser={saveUser} onDevice={setDeviceStatus} onSettings={saveAccessSettings} />}
+            {s.mod === 'access' && me.role === 'owner' && <Access db={s.db} me={me} thisDevice={devId} onSaveUser={saveUser} onDevice={setDeviceStatus} onAccessRequest={decideAccessRequest} onSettings={saveAccessSettings} />}
             {s.mod === 'activity' && me.role === 'owner' && <Activity db={s.db} onRollback={(ids) => set({ modal: { kind: 'rollback', ids, title: 'Undo ' + ids.length + ' change(s)?', kicker: 'Activity', confirmLabel: 'Undo', message: 'The selected changes will be reversed, newest first. Anything changed by someone since is skipped. Items removed by the undo are kept in Voided entries.' } })} />}
             {s.mod === 'approvals' && <Approvals db={s.db} me={me} onDecide={decideApproval} />}
             {s.mod === 'dashboard' && <Dashboard d={d} tab={s.dashTab} setTab={(t) => set({ dashTab: t })} go={go} onOpenParty={openParty} onReport={(day) => openPageReport('daily', { fromDate: day, toDate: day })} />}

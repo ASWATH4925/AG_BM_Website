@@ -1,234 +1,415 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { settings } from '../config';
-import { brandMark } from '../lib/format';
+import { TEMPLATES } from '../lib/access';
+import { brandMark, N } from '../lib/format';
 import '../styles/login.css';
 
-const PANEL_STATS = [
-  { value: '412 t', label: 'Weighed today' },
-  { value: '18', label: 'Open tickets' },
-  { value: '99.4%', label: 'Ticket accuracy' },
-];
-
-const LABEL = { display: 'block', fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-neutral-700)', fontWeight: 700, marginBottom: 7 };
-const GLASS = {
-  border: '1px solid rgba(255,255,255,.85)', borderRadius: 'var(--ag-r)', background: 'rgba(255,255,255,.66)',
-  backdropFilter: 'blur(22px) saturate(1.5)', WebkitBackdropFilter: 'blur(22px) saturate(1.5)',
-  boxShadow: '0 1px 2px rgba(32,30,29,.05), 0 10px 30px -16px rgba(32,30,29,.22)',
-};
+const PIN_MAX = 6;
+const PIN_RE = /^\d{4,6}$/;
+const MOBILE_RE = /^[6-9]\d{9}$/;
+// Weighbridge indicators step in 20 kg divisions; the readout rounds the same way.
+const DIVISION_KG = 20;
 
 const svg = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
-const Check = ({ size, width }) => <svg {...svg} strokeWidth={width} width={size} height={size}><path d="M20 6 9 17l-5-5" /></svg>;
+const Alert = () => <svg {...svg} strokeWidth="2.2" width="13" height="13"><circle cx="12" cy="12" r="10" /><path d="M12 8v5" /><path d="M12 16h.01" /></svg>;
+const Clock = () => <svg {...svg} strokeWidth="2.2" width="24" height="24"><circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" /></svg>;
+const Shield = () => <svg {...svg} strokeWidth="2" width="16" height="16"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" /></svg>;
+const Eye = ({ off }) => (
+  <svg {...svg} strokeWidth="2" width="17" height="17">
+    {off ? (
+      <>
+        <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+        <path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+        <path d="m2 2 20 20" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+      </>
+    ) : (
+      <><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0" /><circle cx="12" cy="12" r="3" /></>
+    )}
+  </svg>
+);
 
-function FieldError({ children }) {
+const initials = (name) => name.trim().split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
+const easyPin = (p) => /^(\d)\1+$/.test(p) || '0123456789'.includes(p) || '9876543210'.includes(p);
+const roleLabel = (u) => (u.role === 'owner' ? 'Owner' : (TEMPLATES[u.template] || {}).l || 'Staff');
+
+function FieldError({ id, children }) {
+  if (!children) return null;
+  return <div id={id} role="alert" className="lg-err ag-fade"><Alert />{children}</div>;
+}
+
+// Restart the card's shake animation after a failed submit.
+function shake(el) {
+  if (!el) return;
+  el.classList.remove('ag-shake');
+  void el.offsetWidth;
+  el.classList.add('ag-shake');
+}
+
+// ── Brand panel: the live bridge readout, the last ticket printed, and today's totals ──
+function BridgePanel({ scaleKg, scaleStable, lastTicket, stats }) {
+  const shown = Math.round((scaleKg || 0) / DIVISION_KG) * DIVISION_KG;
   return (
-    <div role="alert" className="ag-fade" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--color-accent-800)', marginTop: 7 }}>
-      <svg {...svg} strokeWidth="2.2" width="13" height="13"><circle cx="12" cy="12" r="10" /><path d="M12 8v5" /><path d="M12 16h.01" /></svg>
-      {children}
-    </div>
+    <aside className="lg-panel" aria-label={settings.companyName + ' weighbridge'}>
+      <div className="lg-brand"><div className="lg-mark" aria-hidden="true">{brandMark(settings.companyName)}</div><b>{settings.companyName}</b></div>
+
+      <div>
+        <div className="lg-eyebrow">Weighbridge console</div>
+        <h1>Every load, weighed and <em>accounted.</em></h1>
+      </div>
+
+      <div className="lg-scale">
+        <div className="lg-readout">
+          <div className="lg-ro-top">
+            <span>BRIDGE · LIVE</span>
+            <span className="lg-stable" data-on={scaleStable ? '1' : '0'}><i />{scaleStable ? 'STABLE' : 'SETTLING'}</span>
+          </div>
+          <div className="lg-digits" aria-label={'Bridge weight ' + N(shown) + ' kilograms'}><span>{N(shown)}</span><small>KG</small></div>
+        </div>
+
+        {lastTicket && (
+          <div className="lg-slip" aria-label="Last ticket">
+            <div className="lg-slip-head"><span>{lastTicket.ticket}</span><span>{lastTicket.time}</span></div>
+            <dl>
+              <dt>Vehicle</dt><dd>{lastTicket.vehicle || '—'}</dd>
+              <dt>Material</dt><dd>{lastTicket.material}</dd>
+              <dt>Gross</dt><dd>{N(lastTicket.gross)} kg</dd>
+              <dt>Tare</dt><dd>{N(lastTicket.tare)} kg</dd>
+            </dl>
+            <dl className="lg-net"><dt>Net</dt><dd>{N(Math.max(0, lastTicket.gross - lastTicket.tare))} kg</dd></dl>
+          </div>
+        )}
+      </div>
+
+      <div className="lg-stats ag-stagger">
+        {stats.map((p) => <div key={p.label}><b>{p.value}</b><span>{p.label}</span></div>)}
+      </div>
+    </aside>
   );
 }
 
-function Mark({ size, font, radius }) {
-  return (
-    <div
-      aria-hidden="true"
-      style={{
-        width: size, height: size, flex: `0 0 ${size}px`, background: 'var(--color-accent)', borderRadius: radius, display: 'flex',
-        alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: font, color: '#fff',
-      }}
-    >
-      {brandMark(settings.companyName)}
-    </div>
-  );
-}
-
-// Sign-in page: split layout with the dark brand panel, glass card with validation, demo credential check.
-export default function Login({ onEnter }) {
-  const [s, setS] = useState({ email: '', pw: '', showPw: false, remember: true, busy: false, done: false, err: {} });
-  const set = (patch) => setS((st) => ({ ...st, ...(typeof patch === 'function' ? patch(st) : patch) }));
-  const timer = useRef(null);
-  useEffect(() => () => clearTimeout(timer.current), []);
-
-  const submit = (e) => {
+// Radio cards for choosing a person; arrow keys move between them.
+function PersonPicker({ people, value, onChange, labelId }) {
+  const refs = useRef([]);
+  const at = Math.max(0, people.findIndex((p) => p.id === value));
+  const onKey = (e, i) => {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!step) return;
     e.preventDefault();
-    if (s.busy) return;
-    const err = {};
-    const em = s.email.trim();
-    if (!em) err.email = 'Enter your work email.';
-    else if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(em)) err.email = 'That does not look like an email address.';
-    if (!s.pw) err.pw = 'Enter your password.';
-    else if (s.pw.length < 6) err.pw = 'Passwords are at least six characters.';
-    if (Object.keys(err).length) { set({ err }); return; }
-    set({ busy: true, err: {} });
-    timer.current = setTimeout(() => set({ busy: false, done: true }), 1300);
+    const n = (i + step + people.length) % people.length;
+    onChange(people[n].id);
+    refs.current[n] && refs.current[n].focus();
+  };
+  return (
+    <div className="lg-people" role="radiogroup" aria-labelledby={labelId}>
+      {people.map((p, i) => (
+        <button
+          key={p.id}
+          ref={(el) => { refs.current[i] = el; }}
+          type="button"
+          role="radio"
+          aria-checked={p.id === value}
+          tabIndex={i === at ? 0 : -1}
+          className="lg-person"
+          onClick={() => onChange(p.id)}
+          onKeyDown={(e) => onKey(e, i)}
+        >
+          <span className="lg-av">{initials(p.name)}</span>
+          <span><b>{p.name}</b><small>{roleLabel(p)}</small></span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// One real input under six display boxes, so paste, autofill and screen readers behave normally.
+function PinInput({ id, value, onChange, bad, describedBy, inputRef }) {
+  const n = value.length;
+  return (
+    <div className="lg-pin" data-bad={bad ? '1' : '0'}>
+      <input
+        id={id}
+        ref={inputRef}
+        type="password"
+        inputMode="numeric"
+        autoComplete="current-password"
+        maxLength={PIN_MAX}
+        aria-invalid={bad || undefined}
+        aria-describedby={describedBy}
+        value={value}
+        onChange={(e) => onChange(e.target.value.replace(/\D/g, '').slice(0, PIN_MAX))}
+      />
+      {Array.from({ length: PIN_MAX }, (_, i) => <i key={i} className={(i < n ? 'dot' : '') + (i === Math.min(n, PIN_MAX - 1) ? ' cur' : '')} />)}
+    </div>
+  );
+}
+
+// ── Sign in: staff with a PIN, the owner with the password ──
+function SignInPane({ users, onSignIn, reason, cardRef }) {
+  const active = users.filter((u) => u.active !== false);
+  const staff = active.filter((u) => u.role !== 'owner');
+  const owners = active.filter((u) => u.role === 'owner');
+  const [mode, setMode] = useState(staff.length ? 'staff' : 'owner');
+  const [id, setId] = useState('');
+  const [secret, setSecret] = useState('');
+  const [showPw, setShowPw] = useState(false);
+  const [err, setErr] = useState({});
+  const [busy, setBusy] = useState(false);
+  const pinRef = useRef(null);
+
+  const list = mode === 'staff' ? staff : owners;
+  const user = list.length === 1 ? list[0] : list.find((u) => u.id === id);
+  const isOwner = mode === 'owner';
+
+  const switchMode = (m) => { setMode(m); setId(''); setSecret(''); setErr({}); setShowPw(false); };
+  const pickPerson = (pid) => { setId(pid); setSecret(''); setErr({}); if (pinRef.current) pinRef.current.focus(); };
+
+  const attempt = async (value) => {
+    if (busy) return;
+    const e = {};
+    if (!user) e.person = 'Tap your name first.';
+    if (isOwner && !value) e.secret = 'Enter the owner password.';
+    if (!isOwner && !PIN_RE.test(value)) e.secret = 'Enter your 4–6 digit PIN.';
+    if (Object.keys(e).length) { setErr(e); shake(cardRef.current); return; }
+    setBusy(true);
+    let ok = false;
+    try {
+      ok = await onSignIn(user.id, value);
+    } catch {
+      setBusy(false);
+      setErr({ secret: 'This browser could not check the ' + (isOwner ? 'password' : 'PIN') + '. Open the app from its usual address and try again.' });
+      return;
+    }
+    if (ok) return; // App switches to the console.
+    setBusy(false);
+    setSecret('');
+    setErr({ secret: isOwner ? 'That password is not right.' : 'That PIN is not right for ' + user.name + '.' });
+    shake(cardRef.current);
   };
 
-  const usePin = () => set({ email: 'operator@agbluemetals.in', pw: '', showPw: false, err: { pw: 'Enter the six-digit terminal PIN.' } });
+  const onPin = (v) => {
+    setSecret(v); setErr({});
+    if (v.length === PIN_MAX && user) attempt(v);
+  };
 
   return (
-    <div
-      className="pg-login"
-      style={{
-        minHeight: '100vh', display: 'flex', alignItems: 'stretch', background: 'linear-gradient(157deg,#fcfbfa 0%,#f3f2f2 38%,#e9e5e3 74%,#ded8d5 100%)',
-        color: 'var(--color-text)', fontFamily: 'var(--font-body)', letterSpacing: '-0.011em',
-      }}
-    >
-      <aside
-        className="lg-panel"
-        style={{
-          flex: '0 0 44%', maxWidth: 620, minWidth: 0, position: 'relative', overflow: 'hidden', background: 'var(--color-neutral-900)',
-          color: 'var(--color-neutral-100)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', padding: 44,
-        }}
-      >
-        <div className="ag-scan" />
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 11 }}>
-          <Mark size={32} font={13} radius="var(--ag-r-sm)" />
-          <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 15, letterSpacing: '-0.02em' }}>{settings.companyName}</div>
-        </div>
+    <section className="lg-pane ag-rise" id="lg-pane-in" role="tabpanel" aria-labelledby="lg-tab-in">
+      <div className="lg-eyebrow">Console access</div>
+      <h2>{isOwner ? 'Owner sign-in' : 'Who is working?'}</h2>
+      <p className="lg-sub">{isOwner ? 'Full access: staff rights, approvals, devices and undo.' : 'Tap your name and enter your PIN.'}</p>
+      {reason && <div className="lg-notice" role="status">{reason}</div>}
 
-        <div style={{ position: 'relative' }}>
-          <div style={{ fontSize: 10, letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--color-neutral-400)' }}>Weighbridge operations</div>
-          <h1 style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 'clamp(34px,4.2vw,52px)', lineHeight: 1.02, letterSpacing: '-0.045em', margin: '16px 0 0', maxWidth: '11ch', textWrap: 'pretty' }}>
-            Every load, weighed and accounted.
-          </h1>
-          <p style={{ fontSize: 14.5, lineHeight: 1.55, color: 'var(--color-neutral-400)', margin: '18px 0 0', maxWidth: '38ch', textWrap: 'pretty' }}>
-            Tare to gross, rate to receipt. One console for the yard, the ledger and the payroll.
-          </p>
+      {staff.length > 0 && (
+        <div className="lg-who" role="group" aria-label="Sign in as">
+          <button type="button" aria-pressed={!isOwner} onClick={() => switchMode('staff')}>Staff PIN</button>
+          <button type="button" aria-pressed={isOwner} onClick={() => switchMode('owner')}>Owner password</button>
         </div>
+      )}
 
-        <div className="ag-stagger" style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: 'var(--space-4)' }}>
-          {PANEL_STATS.map((p) => (
-            <div key={p.label} style={{ paddingTop: 12, borderTop: '1px solid rgba(255,255,255,.16)' }}>
-              <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 22, letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{p.value}</div>
-              <div style={{ fontSize: 10.5, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--color-neutral-400)', marginTop: 6 }}>{p.label}</div>
-            </div>
-          ))}
-        </div>
-      </aside>
-
-      <main style={{ flex: '1 1 0', minWidth: 0, display: 'grid', placeItems: 'center', padding: '44px 24px' }}>
-        <div style={{ width: 'min(400px,100%)' }}>
-          <div className="lg-mark" style={{ alignItems: 'center', gap: 11, marginBottom: 26 }}>
-            <Mark size={34} font={13.5} radius="var(--ag-r-sm)" />
-            <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 16, letterSpacing: '-0.025em' }}>{settings.companyName}</div>
+      <form onSubmit={(e) => { e.preventDefault(); attempt(secret); }} noValidate className="lg-form">
+        {list.length > 1 ? (
+          <div>
+            <span className="lg-label" id="lg-people-l">{isOwner ? 'Owner' : 'Your name'}</span>
+            <PersonPicker people={list} value={user ? user.id : ''} onChange={pickPerson} labelId="lg-people-l" />
+            <FieldError>{err.person}</FieldError>
           </div>
+        ) : user && (
+          <div className="lg-one">
+            <span className="lg-av">{initials(user.name)}</span>
+            <span><b>{user.name}</b><small>{roleLabel(user)}</small></span>
+          </div>
+        )}
 
-          {s.done ? (
-            <div className="ag-pop" style={{ ...GLASS, padding: '38px 30px', textAlign: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 52, height: 52, margin: '0 auto', borderRadius: 999, background: 'rgba(44,107,18,.12)', color: '#2c6b12' }}>
-                <Check size={24} width={2.5} />
-              </div>
-              <h2 style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 22, letterSpacing: '-0.03em', margin: '18px 0 0' }}>Signed in</h2>
-              <p style={{ fontSize: 13.5, color: 'var(--color-neutral-700)', margin: '7px 0 0' }}>Opening the console for {s.email.trim() || 'your account'}.</p>
-              <div style={{ marginTop: 22 }}>
-                <a
-                  className="btn btn-primary"
-                  href="#/"
-                  onClick={onEnter}
-                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', height: 44, padding: '0 22px', color: '#fff' }}
-                >
-                  Go to console
-                </a>
-              </div>
-              <button type="button" className="ag-alt" style={{ marginTop: 10 }} onClick={() => set({ done: false, pw: '', err: {} })}>Sign in as someone else</button>
+        {isOwner ? (
+          <div>
+            <label className="lg-label" htmlFor="lg-pw">Password</label>
+            <div className="lg-pw">
+              <input
+                id="lg-pw"
+                className="lg-in"
+                type={showPw ? 'text' : 'password'}
+                autoComplete="current-password"
+                autoFocus
+                aria-invalid={err.secret ? true : undefined}
+                aria-describedby="lg-e-secret"
+                value={secret}
+                onChange={(e) => { setSecret(e.target.value); setErr({}); }}
+              />
+              <button type="button" className="lg-eye" aria-label={showPw ? 'Hide password' : 'Show password'} onClick={() => setShowPw((v) => !v)}><Eye off={showPw} /></button>
             </div>
-          ) : (
-            <div className="ag-rise" style={{ ...GLASS, padding: '32px 30px 30px' }}>
-              <div style={{ fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--color-neutral-700)' }}>Console access</div>
-              <h2 style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 27, lineHeight: 1.1, letterSpacing: '-0.035em', margin: '9px 0 0' }}>Sign in</h2>
-              <p style={{ fontSize: 13.5, color: 'var(--color-neutral-700)', margin: '7px 0 0', textWrap: 'pretty' }}>Use the work account issued by your site administrator.</p>
+            <FieldError id="lg-e-secret">{err.secret}</FieldError>
+          </div>
+        ) : (
+          <div>
+            <label className="lg-label" htmlFor="lg-pin">PIN</label>
+            <PinInput id="lg-pin" inputRef={pinRef} value={secret} onChange={onPin} bad={!!err.secret} describedBy="lg-e-secret" />
+            <FieldError id="lg-e-secret">{err.secret}</FieldError>
+          </div>
+        )}
 
-              <form onSubmit={submit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 26 }}>
-                <div>
-                  <label htmlFor="ag-email" style={LABEL}>Work email</label>
-                  <input
-                    id="ag-email"
-                    className="ag-in"
-                    type="email"
-                    autoComplete="username"
-                    placeholder="name@agbluemetals.in"
-                    data-bad={s.err.email ? '1' : '0'}
-                    aria-invalid={s.err.email ? true : undefined}
-                    value={s.email}
-                    onChange={(e) => set({ email: e.target.value, err: {} })}
-                  />
-                  {s.err.email && <FieldError>{s.err.email}</FieldError>}
-                </div>
+        <button type="submit" className="lg-btn" disabled={busy}>
+          {busy && <span className="ag-spin" />}
+          {busy ? (isOwner ? 'Checking password…' : 'Checking PIN…') : user ? 'Sign in as ' + user.name : 'Sign in'}
+        </button>
+        {!isOwner && <p className="lg-hint">Forgot your PIN? The owner can set a new one under Staff &amp; access.</p>}
+      </form>
+    </section>
+  );
+}
 
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-3)', marginBottom: 7 }}>
-                    <label htmlFor="ag-pw" style={{ ...LABEL, display: 'inline', marginBottom: 0 }}>Password</label>
-                    <a href="#reset" style={{ fontSize: 12, fontWeight: 600 }}>Forgot?</a>
-                  </div>
-                  <div style={{ position: 'relative' }}>
-                    <input
-                      id="ag-pw"
-                      className="ag-in"
-                      style={{ paddingRight: 46 }}
-                      type={s.showPw ? 'text' : 'password'}
-                      autoComplete="current-password"
-                      placeholder="••••••••"
-                      data-bad={s.err.pw ? '1' : '0'}
-                      aria-invalid={s.err.pw ? true : undefined}
-                      value={s.pw}
-                      onChange={(e) => set({ pw: e.target.value, err: {} })}
-                    />
-                    <button type="button" className="ag-eye" aria-label={s.showPw ? 'Hide password' : 'Show password'} onClick={() => set((st) => ({ showPw: !st.showPw }))}>
-                      {s.showPw ? (
-                        <svg {...svg} strokeWidth="2" width="17" height="17">
-                          <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
-                          <path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
-                          <path d="m2 2 20 20" /><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-                        </svg>
-                      ) : (
-                        <svg {...svg} strokeWidth="2" width="17" height="17">
-                          <path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0" /><circle cx="12" cy="12" r="3" />
-                        </svg>
-                      )}
-                    </button>
-                  </div>
-                  {s.err.pw && <FieldError>{s.err.pw}</FieldError>}
-                </div>
+// ── Request access: a new person asks the owner for a sign-in ──
+function RequestPane({ users, requests, onRequestAccess, onSent, cardRef }) {
+  const [f, setF] = useState({ name: '', phone: '', template: '', pin: '', pin2: '' });
+  const [err, setErr] = useState({});
+  const [busy, setBusy] = useState(false);
+  const edit = (patch) => { setF((x) => ({ ...x, ...patch })); setErr({}); };
+  const digits = f.phone.replace(/\D/g, '');
 
-                <button
-                  type="button"
-                  className="ag-remember"
-                  role="checkbox"
-                  aria-checked={s.remember}
-                  style={{ display: 'flex', alignItems: 'center', gap: 9, padding: 0, border: 0, background: 'transparent', cursor: 'pointer', fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--color-text)', alignSelf: 'flex-start' }}
-                  onClick={() => set((st) => ({ remember: !st.remember }))}
-                >
-                  <span className="ag-check" data-on={s.remember ? '1' : '0'}><Check size={12} width={3.4} /></span>
-                  Keep me signed in on this terminal
-                </button>
+  const submit = async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    const name = f.name.trim();
+    const taken = (n) => n.trim().toLowerCase() === name.toLowerCase();
+    const x = {};
+    if (name.length < 2) x.name = 'Enter your name as the owner knows it.';
+    else if (users.some((u) => taken(u.name))) x.name = 'Someone already signs in with this name. Add your initial.';
+    else if (requests.some((r) => r.status === 'pending' && taken(r.name))) x.name = 'A request with this name is already waiting for the owner.';
+    if (!MOBILE_RE.test(digits)) x.phone = 'Enter a 10-digit mobile number starting with 6, 7, 8 or 9.';
+    if (!f.template) x.template = 'Choose the work you will do.';
+    if (!PIN_RE.test(f.pin)) x.pin = 'Your PIN needs 4 to 6 digits.';
+    else if (easyPin(f.pin)) x.pin = 'Pick a PIN that is harder to guess than ' + f.pin + '.';
+    else if (f.pin !== f.pin2) x.pin = 'The two PINs do not match.';
+    if (Object.keys(x).length) { setErr(x); shake(cardRef.current); return; }
+    setBusy(true);
+    try {
+      const req = await onRequestAccess({ name, phone: digits, template: f.template, pin: f.pin });
+      onSent(req);
+    } catch {
+      setBusy(false);
+      setErr({ pin: 'This browser could not save the request. Open the app from its usual address and try again.' });
+    }
+  };
 
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, width: '100%', height: 46, fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em', marginTop: 2 }}
-                  disabled={s.busy}
-                >
-                  {s.busy && <span className="ag-spin" />}
-                  {s.busy ? 'Checking credentials…' : 'Sign in'}
-                </button>
-              </form>
+  const templates = Object.entries(TEMPLATES);
+  return (
+    <section className="lg-pane ag-rise" id="lg-pane-up" role="tabpanel" aria-labelledby="lg-tab-up">
+      <div className="lg-eyebrow">New to the yard</div>
+      <h2>Request access</h2>
+      <p className="lg-sub">Send your details to the owner. Your name appears on the sign-in list once they approve you.</p>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', margin: '22px 0 16px' }}>
-                <span style={{ flex: '1 1 auto', height: 1, background: 'rgba(32,30,29,.12)' }} />
-                <span style={{ fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 700, color: 'var(--color-neutral-700)' }}>or</span>
-                <span style={{ flex: '1 1 auto', height: 1, background: 'rgba(32,30,29,.12)' }} />
-              </div>
-
-              <button type="button" className="ag-alt" onClick={usePin}>
-                <svg {...svg} strokeWidth="2" width="16" height="16"><rect width="18" height="11" x="3" y="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
-                Operator PIN for the weighbridge
-              </button>
+      <form onSubmit={submit} noValidate className="lg-form">
+        <div>
+          <label className="lg-label" htmlFor="lg-u-name">Full name</label>
+          <input id="lg-u-name" className="lg-in" autoComplete="name" placeholder="e.g. Ravi Kumar" aria-invalid={err.name ? true : undefined} value={f.name} onChange={(e) => edit({ name: e.target.value })} />
+          <FieldError>{err.name}</FieldError>
+        </div>
+        <div>
+          <label className="lg-label" htmlFor="lg-u-phone">Mobile number</label>
+          <div className="lg-pre">
+            <span>+91</span>
+            <input
+              id="lg-u-phone"
+              className="lg-in"
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel-national"
+              placeholder="98765 43210"
+              aria-invalid={err.phone ? true : undefined}
+              value={f.phone}
+              onChange={(e) => { const d = e.target.value.replace(/\D/g, '').slice(0, 10); edit({ phone: d.length > 5 ? d.slice(0, 5) + ' ' + d.slice(5) : d }); }}
+            />
+          </div>
+          <FieldError>{err.phone}</FieldError>
+        </div>
+        <div>
+          <span className="lg-label" id="lg-roles-l">What will you do?</span>
+          <div className="lg-roles" role="radiogroup" aria-labelledby="lg-roles-l">
+            {templates.map(([k, t]) => (
+              <button key={k} type="button" role="radio" aria-checked={f.template === k} onClick={() => edit({ template: k })}>{t.l}</button>
+            ))}
+          </div>
+          <FieldError>{err.template}</FieldError>
+        </div>
+        <div>
+          <div className="lg-two">
+            <div>
+              <label className="lg-label" htmlFor="lg-u-pin">Choose a PIN</label>
+              <input id="lg-u-pin" className="lg-in" type="password" inputMode="numeric" autoComplete="new-password" maxLength={PIN_MAX} placeholder="4–6 digits" value={f.pin} onChange={(e) => edit({ pin: e.target.value.replace(/\D/g, '') })} />
             </div>
-          )}
+            <div>
+              <label className="lg-label" htmlFor="lg-u-pin2">Repeat PIN</label>
+              <input id="lg-u-pin2" className="lg-in" type="password" inputMode="numeric" autoComplete="new-password" maxLength={PIN_MAX} placeholder="4–6 digits" value={f.pin2} onChange={(e) => edit({ pin2: e.target.value.replace(/\D/g, '') })} />
+            </div>
+          </div>
+          <FieldError>{err.pin}</FieldError>
+        </div>
+        <div className="lg-note"><Shield /><span>The owner decides what you can open. Changes they mark for approval wait in their inbox before they count.</span></div>
+        <button type="submit" className="lg-btn" disabled={busy}>
+          {busy && <span className="ag-spin" />}
+          {busy ? 'Sending…' : 'Send request to owner'}
+        </button>
+      </form>
+    </section>
+  );
+}
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--space-3)', marginTop: 20, fontSize: 12, color: 'var(--color-neutral-700)' }}>
-            <span>Bridge terminal 1 · Hosur Road yard</span>
-            <a href="#help">Need help?</a>
+function Sent({ req, onBack }) {
+  const rows = [
+    ['Reference', req.ref],
+    ['Name', req.name],
+    ['Mobile', '+91 ' + req.phone.slice(0, 5) + ' ' + req.phone.slice(5)],
+    ['Work', (TEMPLATES[req.template] || {}).l || req.template],
+    ['Status', 'Waiting for owner'],
+  ];
+  return (
+    <section className="lg-done ag-pop" aria-live="polite">
+      <div className="lg-badge"><Clock /></div>
+      <h2>Request sent</h2>
+      <p className="lg-sub">Ask the owner to approve you under Staff &amp; access. Then sign in here with your name and PIN.</p>
+      <dl className="lg-receipt">{rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>
+      <button type="button" className="lg-btn lg-ghost" autoFocus onClick={onBack}>Back to sign in</button>
+    </section>
+  );
+}
+
+// Sign-in screen for an approved device: staff PIN, owner password, or a request for a new sign-in.
+export default function Login({ users, requests = [], onSignIn, onRequestAccess, reason, deviceName, scaleKg, scaleStable, lastTicket, stats = [] }) {
+  const [tab, setTab] = useState('in');
+  const [sent, setSent] = useState(null);
+  const cardRef = useRef(null);
+  const tabRefs = { in: useRef(null), up: useRef(null) };
+  const go = (t) => { setTab(t); setSent(null); };
+  const onTabKey = (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const next = tab === 'in' ? 'up' : 'in';
+    go(next);
+    tabRefs[next].current.focus();
+  };
+  const tabProps = (t, label) => ({
+    ref: tabRefs[t], id: 'lg-tab-' + t, role: 'tab', type: 'button', className: 'lg-tab', 'aria-controls': 'lg-pane-' + t,
+    'aria-selected': tab === t, tabIndex: tab === t ? 0 : -1, onClick: () => go(t), onKeyDown: onTabKey, children: label,
+  });
+
+  return (
+    <div className="pg-login">
+      <BridgePanel scaleKg={scaleKg} scaleStable={scaleStable} lastTicket={lastTicket} stats={stats} />
+
+      <main className="lg-main">
+        <div className="lg-col">
+          <div className="lg-card" ref={cardRef}>
+            {sent ? <Sent req={sent} onBack={() => go('in')} /> : (
+              <>
+                <div className="lg-tabs" role="tablist" aria-label="Account">
+                  <button {...tabProps('in', 'Sign in')} />
+                  <button {...tabProps('up', 'Request access')} />
+                </div>
+                {tab === 'in'
+                  ? <SignInPane users={users} onSignIn={onSignIn} reason={reason} cardRef={cardRef} />
+                  : <RequestPane users={users} requests={requests} onRequestAccess={onRequestAccess} onSent={setSent} cardRef={cardRef} />}
+              </>
+            )}
+          </div>
+          <div className="lg-foot">
+            <span className="lg-dev"><i />This device is approved{deviceName ? ' · ' + deviceName : ''}</span>
           </div>
         </div>
       </main>

@@ -38,7 +38,7 @@ function LevelPicker({ value, task, onChange }) {
 }
 
 // Owner only: staff sign-ins and what each may do, approved devices, and the idle sign-out time.
-export default function Access({ db, me, thisDevice, onSaveUser, onDevice, onSettings }) {
+export default function Access({ db, me, thisDevice, onSaveUser, onDevice, onSettings, onAccessRequest }) {
   const [tab, setTab] = useState(TABS[0]);
   const users = db.users || [];
   const staff = users.filter((u) => u.role !== 'owner');
@@ -67,16 +67,44 @@ export default function Access({ db, me, thisDevice, onSaveUser, onDevice, onSet
   };
   const order = { pending: 0, approved: 1, revoked: 2 };
   const devices = (db.devices || []).slice().sort((a, b) => order[a.status] - order[b.status]);
+  const requests = (db.accessRequests || []).filter((r) => r.status === 'pending');
 
   return (
     <section aria-label="Staff and access">
       <div role="tablist" aria-label="Access sections" style={{ display: 'flex', flexWrap: 'wrap', borderBottom: '1px solid rgba(32,30,29,.10)', marginBottom: 'var(--space-6)' }}>
         {TABS.map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} className="ag-tab" data-on={tab === t ? '1' : '0'} onClick={() => setTab(t)}>
-            {t}{t === 'Devices' && devices.some((x) => x.status === 'pending') ? ' •' : ''}<i />
+            {t}{(t === 'Devices' && devices.some((x) => x.status === 'pending')) || (t === 'Staff & rights' && requests.length) ? ' •' : ''}<i />
           </button>
         ))}
       </div>
+
+      {tab === 'Staff & rights' && requests.length > 0 && (
+        <Panel className="ag-rise" style={{ marginBottom: 'var(--space-6)' }} title="Access requests" sub="People who asked for a sign-in from the sign-in screen. Approving adds them as staff with the rights they asked for; you can change those rights after.">
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table" style={{ width: '100%', minWidth: 720 }}>
+              <thead><tr><th style={TH}>Name</th><th style={TH}>Mobile</th><th style={TH}>Asked for</th><th style={TH}>From device</th><th style={TH}>When</th><th style={{ ...TH, ...R }}>Decision</th></tr></thead>
+              <tbody>
+                {requests.map((r) => (
+                  <tr key={r.id}>
+                    <td><strong>{r.name}</strong><div style={{ fontSize: 11.5, color: 'var(--color-neutral-600)' }}>{r.ref}</div></td>
+                    <td className="ag-tabular">+91 {r.phone}</td>
+                    <td>{(TEMPLATES[r.template] || {}).l || r.template}</td>
+                    <td>{r.deviceName || '—'}</td>
+                    <td className="ag-tabular">{when(r.at)}</td>
+                    <td style={R}>
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button type="button" className="btn btn-secondary" onClick={() => onAccessRequest(r.id, false)}>Decline</button>
+                        <button type="button" className="btn btn-primary" onClick={() => onAccessRequest(r.id, true)}>Approve</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
 
       {tab === 'Staff & rights' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(300px,100%),1fr))', gap: 'var(--space-6)', alignItems: 'start' }}>

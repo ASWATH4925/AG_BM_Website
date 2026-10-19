@@ -108,7 +108,7 @@ export const canOpen = (user, mod) => {
 };
 
 // ---- comparing the books before and after an action ----
-const SKIP = new Set(['audit', 'approvals', 'users', 'devices']);
+const SKIP = new Set(['audit', 'approvals', 'users', 'devices', 'accessRequests']);
 const idOf = (coll, r) => (coll === 'staging' ? r.key : r.id);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
