@@ -116,24 +116,6 @@ body { margin:0; background:var(--color-bg); -webkit-font-smoothing:antialiased;
   transform:scaleX(0); transform-origin:left; transition:transform .38s var(--ag-ease) }
 .ag-kpi:hover::after{ transform:scaleX(1) }
 
-.ag-acctcard{ border:1px solid rgba(32,30,29,.10); border-radius:12px; overflow:hidden; background:rgba(255,255,255,.5);
-  transition:border-color var(--ag-fast), box-shadow var(--ag-mid) var(--ag-ease) }
-.ag-acctcard:hover{ border-color:rgba(32,30,29,.18); box-shadow:0 1px 2px rgba(32,30,29,.05), 0 8px 20px -12px rgba(32,30,29,.3) }
-.ag-acct{ transition:background var(--ag-fast) var(--ag-ease) }
-.ag-acct:hover{ background:rgba(255,255,255,.72) }
-.ag-acct:hover svg{ color:var(--color-text) }
-.ag-out{ display:flex; align-items:center; justify-content:center; gap:8px; width:100%; padding:10px 12px;
-  border:0; border-top:1px solid rgba(32,30,29,.10); background:transparent; text-decoration:none;
-  font-family:var(--font-body); font-size:12.5px; font-weight:700; letter-spacing:-0.01em; color:var(--color-accent-800);
-  cursor:pointer; transition:background var(--ag-fast) var(--ag-ease), color var(--ag-fast) }
-.ag-out:hover{ background:rgba(236,48,19,.10); color:var(--color-accent) }
-.ag-side{ width:244px; flex:0 0 244px; border-right:1px solid var(--color-neutral-300);
-  position:sticky; top:0; height:100vh; display:flex; flex-direction:column; overflow-y:auto }
-.ag-side[data-narrow="1"]{ width:auto; flex:none; height:auto; position:static; border-right:0;
-  flex-direction:row; gap:6px; overflow-x:auto; overflow-y:visible; padding:10px;
-  border-bottom:1px solid rgba(255,255,255,.8) }
-.ag-navitem{ transition:background var(--ag-fast) var(--ag-ease), color var(--ag-fast), letter-spacing var(--ag-mid) var(--ag-ease) }
-.ag-navitem:active{ transform:translateX(1px) }
 .ag-row{ transition:background var(--ag-mid) var(--ag-ease) }
 .ag-row:hover{ background:var(--color-bg) }
 
@@ -152,6 +134,28 @@ body { margin:0; background:var(--color-bg); -webkit-font-smoothing:antialiased;
   transform:scaleX(0); transform-origin:left; transition:transform .42s var(--ag-ease) }
 .ag-tab[data-on="1"]{ color:var(--color-text); font-weight:700 }
 .ag-tab[data-on="1"]>i{ transform:scaleX(1) }
+
+/* Segmented control: options share one recessed track; a raised white thumb slides to the chosen one. */
+.ag-seg{ position:relative; display:inline-grid; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); gap:4px; padding:4px;
+  border-radius:calc(var(--ag-r-sm) + 4px); background:rgba(32,30,29,.07); box-shadow:inset 0 1px 2px rgba(32,30,29,.06) }
+.ag-seg>button{ appearance:none; border:0; min-width:120px; height:38px; padding:0 18px; border-radius:var(--ag-r-sm); background:transparent; cursor:pointer;
+  font-family:var(--font-body); font-size:13.5px; font-weight:600; letter-spacing:-0.01em; color:var(--color-text);
+  transition:background var(--ag-fast) var(--ag-ease), box-shadow var(--ag-fast) var(--ag-ease), color var(--ag-fast) }
+.ag-seg>button{ position:relative; z-index:1 }
+.ag-seg>button:hover:not([aria-selected="true"]){ background:rgba(32,30,29,.05) }
+.ag-seg>button[aria-selected="true"]{ font-weight:700 }
+/* One thumb per control, sized to one option and moved by its index (--seg-i of --seg-n); 4px = track padding and gap. */
+.ag-seg-thumb{ position:absolute; z-index:0; top:4px; bottom:4px; left:4px; pointer-events:none;
+  width:calc((100% - 8px - (var(--seg-n) - 1) * 4px) / var(--seg-n));
+  transform:translateX(calc(var(--seg-i) * (100% + 4px)));
+  border-radius:var(--ag-r-sm); background:#fff; box-shadow:0 1px 2px rgba(32,30,29,.12), 0 2px 8px -4px rgba(32,30,29,.18);
+  transition:transform .36s cubic-bezier(.32,.72,0,1) }
+@media (prefers-reduced-motion:reduce){ .ag-seg-thumb{ transition:none } }
+.ag-seg>button:focus-visible{ outline:none; box-shadow:0 0 0 2px var(--color-accent) }
+/* Full-width variant: the track spans its container and the options split it evenly. */
+.ag-seg.ag-seg-block{ display:grid; width:100% }
+.ag-seg.ag-seg-block>button{ min-width:0 }
+@media (max-width:480px){ .ag-seg{ display:grid; width:100% } .ag-seg>button{ min-width:0 } }
 
 .ag-card{ transition:box-shadow var(--ag-mid) var(--ag-ease), transform var(--ag-mid) var(--ag-ease) }
 .ag-card:hover{ box-shadow:0 2px 4px rgba(32,30,29,.06), 0 18px 40px -18px rgba(32,30,29,.3); transform:translate3d(0,-2px,0) }
@@ -189,3 +193,28 @@ table.table th:hover{ color:var(--color-accent-700) }
 table.table td{ white-space:nowrap; transition:background var(--ag-fast) }
 table.table tbody tr{ animation:ag-fade .38s var(--ag-out) both; transition:background var(--ag-fast) var(--ag-ease) }
 table.table tbody tr:hover td{ background:color-mix(in srgb,var(--color-text) 5%,transparent) }
+
+/* Table rows that open a details page when clicked. */
+tr.ag-row-link{ cursor:pointer }
+tr.ag-row-link:hover{ background:color-mix(in srgb, var(--color-accent) 6%, transparent) }
+tr.ag-row-link:focus-visible{ outline:2px solid var(--color-accent); outline-offset:-2px }
+
+/* Sidebar (restored original design) */
+.ag-acctcard{ border:1px solid rgba(32,30,29,.10); border-radius:12px; overflow:hidden; background:rgba(255,255,255,.5);
+  transition:border-color var(--ag-fast), box-shadow var(--ag-mid) var(--ag-ease) }
+.ag-acctcard:hover{ border-color:rgba(32,30,29,.18); box-shadow:0 1px 2px rgba(32,30,29,.05), 0 8px 20px -12px rgba(32,30,29,.3) }
+.ag-acct{ transition:background var(--ag-fast) var(--ag-ease) }
+.ag-acct:hover{ background:rgba(255,255,255,.72) }
+.ag-acct:hover svg{ color:var(--color-text) }
+.ag-out{ display:flex; align-items:center; justify-content:center; gap:8px; width:100%; padding:10px 12px;
+  border:0; border-top:1px solid rgba(32,30,29,.10); background:transparent; text-decoration:none;
+  font-family:var(--font-body); font-size:12.5px; font-weight:700; letter-spacing:-0.01em; color:var(--color-accent-800);
+  cursor:pointer; transition:background var(--ag-fast) var(--ag-ease), color var(--ag-fast) }
+.ag-out:hover{ background:rgba(236,48,19,.10); color:var(--color-accent) }
+.ag-side{ width:244px; flex:0 0 244px; border-right:1px solid var(--color-neutral-300);
+  position:sticky; top:0; height:100vh; display:flex; flex-direction:column; overflow-y:auto }
+.ag-side[data-narrow="1"]{ width:auto; flex:none; height:auto; position:static; border-right:0;
+  flex-direction:row; gap:6px; overflow-x:auto; overflow-y:visible; padding:10px;
+  border-bottom:1px solid rgba(255,255,255,.8) }
+.ag-navitem{ transition:background var(--ag-fast) var(--ag-ease), color var(--ag-fast), letter-spacing var(--ag-mid) var(--ag-ease) }
+.ag-navitem:active{ transform:translateX(1px) }

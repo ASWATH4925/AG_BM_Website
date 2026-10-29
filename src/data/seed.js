@@ -10,12 +10,6 @@ const cust = [
   owner: '', address: '', contact: '', gst: '', status: 'Active', remarks: '', received: 0, last: '—',
 }));
 
-// Soling (boulder) suppliers (we owe them). Kept apart from credit parties.
-const suppliers = ['SKK KARTHI', 'SARAVANABAVA', 'SR'].map((name, i) => ({
-  id: 'P' + String(i + 1).padStart(2, '0'), code: 'SP-' + String(i + 1).padStart(2, '0'), name,
-  owner: '', address: '', contact: '', upi: '', linkedCustId: '', status: 'Active', remarks: '',
-}));
-
 // Materials. Everything is priced per ton; "Other" takes a name typed on the ticket; soling is bought, never sold.
 const mats = [
   ['M01', 'AG-14', 'Aggregate 1/4', 'Aggregate'],
@@ -126,7 +120,7 @@ walkIns.forEach((w, i) => {
 });
 const payments = walkIns.map((w, i) => ({
   id: 'YW' + i, date: '2026-10-08', time: w[1], ticketId: 'OW' + i, custId: '', walkIn: w[2], method: w[7], amount: w[8],
-  toType: 'company', supplierId: '', toName: '', remarks: '', by: 'Murugan R',
+  toType: 'company', toName: '', remarks: '', by: 'Murugan R',
 }));
 
 // Soling (boulder) loads from the 22 Aug register. Soling trucks come in loaded, so the register's
@@ -136,13 +130,8 @@ const purchases = [
   ['CR00007', '14:36', 'SARAVANABAVA', 'TN41BD1599', 17300, 48860],
   ['CR00010', '14:51', 'SR', 'TN85L2226', 16860, 47570],
 ].map((r, i) => ({
-  id: 'U' + i, serial: r[0], date: '2026-08-22', time: r[1], supplierId: suppliers.find((p) => p.name === r[2]).id, regName: r[2],
-  vehicle: r[3], tare: r[4], gross: r[5], manualRate: '', extra: '', batchId: '', remarks: '', by: 'System',
-}));
-
-// Sample soling rates (₹ per ton) so the ledger has values — replace them with the agreed rates.
-const solRates = suppliers.map((p, i) => ({
-  id: 'SR' + i, supplierId: p.id, rate: [380, 400, 390][i], from: '2026-08-01', to: '', remarks: 'Sample rate — change to the agreed rate', by: 'System',
+  id: 'U' + i, serial: r[0], date: '2026-08-22', time: r[1], supplierName: r[2], regName: r[2],
+  vehicle: r[3], tare: r[4], gross: r[5], manualRate: [380, 400, 390][i], extra: '', batchId: '', remarks: 'Sample rate — change to the agreed rate', by: 'System',
 }));
 
 // Soling loads stored before Module 3 kept the register columns as they were (tare 0, gross, net).
@@ -158,12 +147,12 @@ const creditors = [
   { id: 'K02', code: 'SC-01', kind: 'vendor', name: 'KAVERI SPARES', owner: '', contact: '', address: '', upi: '', gstin: '', status: 'Active', remarks: 'Sample company — rename to your supplier' },
 ];
 const crBill = (id, creditorId, date, time, extra) => ({
-  id, creditorId, date, time, billNo: '', vehicle: '', forType: '', forSupplierId: '', forName: '', litres: '', rate: '', amount: '', gst: '', items: '', remarks: '', by: 'A. Gopalakrishnan', ...extra,
+  id, creditorId, date, time, billNo: '', vehicle: '', forType: '', forName: '', litres: '', rate: '', amount: '', gst: '', items: '', remarks: '', by: 'A. Gopalakrishnan', ...extra,
 });
 const crBills = [
   crBill('KB1', 'K01', '2026-10-05', '07:30', { billNo: 'S-1021', forType: 'tanker', vehicle: 'TN 32 T 4410', litres: 500, rate: 94.5 }),
   crBill('KB2', 'K01', '2026-10-06', '08:10', { billNo: 'S-1034', forType: 'own', vehicle: 'TN 32 J 3355', litres: 60, rate: 94.5 }),
-  crBill('KB3', 'K01', '2026-10-07', '17:40', { billNo: 'IND-12', forType: 'soling', forSupplierId: 'P03', vehicle: 'TN85L2226', litres: 80, rate: 94.5, remarks: 'Indent for SR — deduct on their account' }),
+  crBill('KB3', 'K01', '2026-10-07', '17:40', { billNo: 'IND-12', forType: 'other', forName: 'SR', vehicle: 'TN85L2226', litres: 80, rate: 94.5, remarks: 'Indent for SR — deduct on their account' }),
   crBill('KB4', 'K02', '2026-10-03', '12:00', { billNo: 'KS/2291', items: 'Jaw plate, 2 nos', amount: 18000, gst: 3240 }),
 ];
 const crPayments = [
@@ -174,7 +163,7 @@ export const SEED_NEXT_TICKET = 24118;
 
 export function seedDb() {
   return JSON.parse(JSON.stringify({
-    customers: cust, suppliers, materials: mats, rates, orders: ord, payments, purchases, solRates, supPayments: [], creditors, crBills, crPayments, staging: [], imports: [], voided: [],
+    customers: cust, materials: mats, rates, orders: ord, payments, purchases, creditors, crBills, crPayments, staging: [], imports: [],
     employees: emp, attendance: att, advances: adv, payroll: pay, onsite,
     expenses: exp.map((x) => ({ time: '', headOther: '', ...x, mode: x.mode === 'Bank Transfer' ? 'Account' : x.mode, head: x.head === 'Electricity' ? 'Electricity (EB)' : x.head })),
     settings: { cashStart: 0, bankStart: 0, startDate: '' },
@@ -188,22 +177,34 @@ export function peopleSeed() {
 
 // Fills in collections added after a browser first saved its data, so older saves keep working.
 export function upgradeDb(saved) {
-  const db = { payments: [], purchases: [], staging: [], imports: [], suppliers: [], voided: [], supPayments: [], users: [], devices: [], approvals: [], audit: [], accessRequests: [], ...saved };
-  if (!db.solRates) db.solRates = JSON.parse(JSON.stringify(solRates));
-  db.purchases = db.purchases.map(normalSoling);
+  // Older saves kept a `voided` archive and soling supplier accounts (suppliers, their rates, payments and passes).
+  // Neither is used any more: each soling load now carries its supplier's name and its own rate.
+  const { voided: _v, suppliers: oldSuppliers = [], solRates: oldRates = [], supPayments: _sp, solPasses: _pp, ...rest } = saved;
+  const db = { payments: [], purchases: [], staging: [], imports: [], users: [], approvals: [], audit: [], accessRequests: [], ...rest };
+  const supName = (id) => (oldSuppliers.find((p) => p.id === id) || {}).name || '';
+  const supRate = (id, date) => (oldRates
+    .filter((r) => r.supplierId === id && r.from <= date && (!r.to || date <= r.to))
+    .sort((a, b) => b.from.localeCompare(a.from))[0] || {}).rate || '';
+  db.purchases = db.purchases.map(normalSoling).map(({ supplierId, ...u }) => (supplierId === undefined ? u : {
+    ...u,
+    supplierName: u.supplierName || supName(supplierId) || u.regName || '',
+    manualRate: +u.manualRate > 0 ? u.manualRate : supRate(supplierId, u.date || ''),
+  }));
+  // UPI a customer sent straight to a soling supplier: keep it, as paid to someone else by that name.
+  db.payments = db.payments.map(({ supplierId, ...p }) => (p.toType === 'supplier' ? { ...p, toType: 'other', toName: p.toName || supName(supplierId) || 'Soling supplier' } : p));
+  db.crBills = (db.crBills || []).map(({ forSupplierId, ...b }) => (b.forType === 'soling' ? { ...b, forType: 'other', forName: b.forName || supName(forSupplierId) } : b));
   // Saves from before daily wages held demo monthly salaries; start them on the daily-wage sample instead.
   if ((db.employees || []).length && !db.employees.some((e) => 'wage' in e)) Object.assign(db, peopleSeed());
   if (!db.creditors) Object.assign(db, JSON.parse(JSON.stringify({ creditors, crBills, crPayments })));
   if (!db.settings) db.settings = { cashStart: 0, bankStart: 0, startDate: '' };
   db.expenses = (db.expenses || []).map((x) => ({ time: '', headOther: '', ...x, mode: x.mode === 'Bank Transfer' ? 'Account' : x.mode, head: x.head === 'Electricity' ? 'Electricity (EB)' : x.head }));
-  db.voided = db.voided.map((e) => (e.records && e.records.purchases ? { ...e, records: { ...e.records, purchases: e.records.purchases.map(normalSoling) } } : e));
   // Older saves kept a party's receipts as one running total; turn it into a receipt record so it shows in payment history.
   const receipts = [];
   db.customers = db.customers.map((c) => {
     if (!(+c.received > 0)) return c;
     receipts.push({
       id: 'YR-' + c.id, date: c.last && c.last !== '—' ? c.last : '2026-10-01', time: '00:00', ticketId: '', custId: c.id, walkIn: '',
-      method: 'Cash', amount: +c.received, toType: 'company', supplierId: '', toName: '', ref: 'Earlier receipts', remarks: 'Carried over from the earlier total', by: 'System',
+      method: 'Cash', amount: +c.received, toType: 'company', toName: '', ref: 'Earlier receipts', remarks: 'Carried over from the earlier total', by: 'System',
     });
     return { ...c, received: 0 };
   });

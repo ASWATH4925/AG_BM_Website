@@ -48,13 +48,19 @@ function Cell({ r, col }) {
   return <td style={style}>{v}</td>;
 }
 
-export default function ListModule({ mod, d, f, setF, onAdd, onEdit, onDelete, onRowAction }) {
+export default function ListModule({ mod, d, f, setF, onAdd, onEdit, onDelete, onRowAction, onReport, reportLabel = 'Report' }) {
   const c = moduleConfig(mod, d);
   const meta = MODS[mod];
   const rows = filterRows(c, f, d.db);
   const all = c.only ? (d.db[c.key] || []).filter(c.only) : d.db[c.key] || [];
   const kpis = listKpis(mod, rows, d);
-  const rowAction = mod === 'voids' ? { label: 'Reinstate', kind: 'reinstate' } : c.rowAction || null;
+  const rowAction = c.rowAction || null;
+  // When set, clicking anywhere on a row (or Enter on it) runs the row action — e.g. opens the customer's page.
+  const rowOpens = !!(c.rowOpens && rowAction);
+  const openRow = (e, r) => {
+    if (e.target.closest('button, a, input, select, textarea')) return; // the row's own buttons keep their job
+    onRowAction(rowAction.kind, r);
+  };
 
   const sortBy = (k) => setF((s) => ({ sortK: k, sortDir: s.sortK === k ? -s.sortDir : 1 }));
 
@@ -95,6 +101,7 @@ export default function ListModule({ mod, d, f, setF, onAdd, onEdit, onDelete, o
           )}
           <div style={{ display: 'flex', gap: 'var(--space-2)', marginLeft: 'auto' }}>
             <button type="button" className="btn btn-secondary" onClick={() => setF({ q: '', status: 'All', from: '', to: '', sortK: null })}>Reset</button>
+            {onReport && <button type="button" className="btn btn-secondary" onClick={onReport}>{reportLabel}</button>}
             <button type="button" className="btn btn-primary" onClick={onAdd}>{c.add}</button>
           </div>
         </div>
@@ -124,7 +131,14 @@ export default function ListModule({ mod, d, f, setF, onAdd, onEdit, onDelete, o
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.id}>
+                <tr
+                  key={r.id}
+                  {...(rowOpens ? {
+                    className: 'ag-row-link', tabIndex: 0, 'aria-label': rowAction.label + ' ' + (r.name || r.ticket || r.code || ''),
+                    onClick: (e) => openRow(e, r),
+                    onKeyDown: (e) => { if (e.key === 'Enter' && e.target === e.currentTarget) onRowAction(rowAction.kind, r); },
+                  } : {})}
+                >
                   {c.cols.map((col) => <Cell key={col.k} r={r} col={col} />)}
                   <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {rowAction && <button type="button" className="btn btn-ghost" onClick={() => onRowAction(rowAction.kind, r)}>{rowAction.label}</button>}

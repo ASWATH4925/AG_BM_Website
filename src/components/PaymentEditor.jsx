@@ -6,9 +6,9 @@ import Select from './Select';
 
 const ERR = { display: 'block', fontSize: 11, color: 'var(--color-accent-700)', fontWeight: 600, marginTop: 3 };
 
-// Records how a sale was paid: credit, cash, UPI (to a soling supplier, the company or someone else),
+// Records how a sale was paid: credit, cash, UPI (to the company, a bunk / spares company or someone else),
 // bank / account, or a split across several of these, with an optional round-off and remarks.
-export default function PaymentEditor({ title, sub, bill, walkIn, initial, suppliers, creditors = [], onSave, onClose }) {
+export default function PaymentEditor({ title, sub, bill, walkIn, initial, creditors = [], onSave, onClose }) {
   const [pay, setPay] = useState(initial);
   const [tried, setTried] = useState(false);
   const ref = useRef(null);
@@ -36,12 +36,11 @@ export default function PaymentEditor({ title, sub, bill, walkIn, initial, suppl
   });
   const setLine = (i, patch) => setPay((p) => ({ ...p, lines: p.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
   const toOptions = [
-    ...suppliers.map((s) => ({ v: 'S:' + s.id, l: s.name + ' (soling supplier)' })),
     ...creditors.map((c) => ({ v: 'C:' + c.id, l: c.name + (c.kind === 'bunk' ? ' (fuel bunk)' : ' (spares)') })),
     { v: 'company', l: 'Company UPI' },
     { v: 'other', l: 'Someone else…' },
   ];
-  const toValue = (l) => (l.toType === 'supplier' ? (l.supplierId ? 'S:' + l.supplierId : '') : l.toType === 'creditor' ? (l.creditorId ? 'C:' + l.creditorId : '') : l.toType);
+  const toValue = (l) => (l.toType === 'creditor' ? (l.creditorId ? 'C:' + l.creditorId : '') : l.toType);
 
   const submit = (e) => {
     e.preventDefault();
@@ -120,7 +119,7 @@ export default function PaymentEditor({ title, sub, bill, walkIn, initial, suppl
                     label={'Line ' + (i + 1) + ' method'}
                     value={l.method}
                     options={LINE_METHODS.map((x) => ({ v: x, l: METHOD_LABEL[x] }))}
-                    onChange={(v) => setLine(i, { method: v, toType: v === 'UPI' ? 'supplier' : 'company', supplierId: '', creditorId: '', toName: '' })}
+                    onChange={(v) => setLine(i, { method: v, toType: 'company', creditorId: '', toName: '' })}
                   />
                 </Field>
               )}
@@ -135,7 +134,7 @@ export default function PaymentEditor({ title, sub, bill, walkIn, initial, suppl
                     value={toValue(l)}
                     placeholder="Choose who received it…"
                     options={toOptions}
-                    onChange={(v) => setLine(i, v.startsWith('S:') ? { toType: 'supplier', supplierId: v.slice(2), creditorId: '', toName: '' } : v.startsWith('C:') ? { toType: 'creditor', creditorId: v.slice(2), supplierId: '', toName: '' } : { toType: v, supplierId: '', creditorId: '', toName: '' })}
+                    onChange={(v) => setLine(i, v.startsWith('C:') ? { toType: 'creditor', creditorId: v.slice(2), toName: '' } : { toType: v, creditorId: '', toName: '' })}
                   />
                   {l.toType !== 'other' && errs['to' + i] && <span role="alert" style={ERR}>{errs['to' + i]}</span>}
                 </Field>

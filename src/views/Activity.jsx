@@ -10,7 +10,7 @@ const show = (v) => (v === '' || v == null ? '—' : typeof v === 'object' ? JSO
 
 // The record-by-record detail of one change.
 export function ChangeDetail({ ops }) {
-  const shown = ops.filter((o) => !(o.coll === 'voided' && o.op === 'add'));
+  const shown = ops.filter((o) => o.coll !== 'voided'); // archive from older saves
   return (
     <div style={{ fontSize: 12.5, color: 'var(--color-neutral-700)', marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
       {shown.slice(0, 12).map((o, i) => {
@@ -76,7 +76,7 @@ export default function Activity({ db, onRollback }) {
         <button type="button" className="btn btn-ghost" onClick={reset}>Clear</button>
         <button type="button" className="btn btn-primary" disabled={!chosen.length} onClick={() => onRollback(chosen.map((a) => a.id))}>Undo {chosen.length || ''} selected</button>
         <span style={{ fontSize: 12.5, color: 'var(--color-neutral-700)', flex: '1 1 320px' }}>
-          Undo reverses the changes: added items are removed (kept in Voided entries), removed items come back, edits return to before.
+          Undo reverses the changes: added items are removed, removed items come back, edits return to before.
           Register rows that were posted go back to Register Import as pending, so someone else can process them again.
         </span>
       </div>

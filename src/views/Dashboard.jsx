@@ -3,6 +3,7 @@ import Panel from '../components/Panel';
 import StatTile, { MinorTile } from '../components/StatTile';
 import Tag from '../components/Tag';
 import { TODAY } from '../config';
+import { cameInLoaded, firstWeight } from '../lib/domain';
 import { isoDate, M, N, T, U } from '../lib/format';
 import { isPaidMethod, METHOD_LABEL } from '../lib/payments';
 import { createPeople, weekEndOf } from '../lib/people';
@@ -48,7 +49,6 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty, onReport })
     g.total += x.amount;
     g.count += 1;
     g.methods[x.method] = (g.methods[x.method] || 0) + x.amount;
-    if (x.p && x.p.toType === 'supplier') g.toSup.push(M(x.amount) + ' → ' + d.supplier(x.p.supplierId).name);
     if (x.p && x.p.toType === 'creditor') g.toSup.push(M(x.amount) + ' → ' + d.creditor(x.p.creditorId).name);
     return acc;
   }, {})).sort((a, b) => b.total - a.total);
@@ -58,14 +58,13 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty, onReport })
   const heroKpis = [
     { label: 'Sold ' + dayName, value: U(tons) + ' units', note: T(tons) + ' t · ' + todays.length + (todays.length === 1 ? ' load' : ' loads') + (prevDate ? ' · ' + U(prevTons) + ' units on ' + dayLabel(prevDate) : ''), ...deltaOf(tons, prevTons) },
     { label: 'Billed ' + dayName, value: M(rev), note: 'Material value + GST + rent', ...deltaOf(rev, prevRev) },
-    { label: 'Paid by parties ' + dayName, value: M(collected), note: payers.length + ' credit part' + (payers.length === 1 ? 'y' : 'ies') + ' paid' },
+    { label: 'Paid by customers ' + dayName, value: M(collected), note: payers.length + ' customer' + (payers.length === 1 ? '' : 's') + ' paid' },
     { label: 'Outstanding credit', value: M(outs), note: D.customers.filter((c) => d.outstanding(c) > 0).length + ' accounts carrying a balance' },
   ];
-  const oweSup = (D.suppliers || []).reduce((t, p) => t + Math.max(0, d.owed(p)), 0);
   const oweCr = (D.creditors || []).reduce((t, c) => t + Math.max(0, d.crOwed(c)), 0);
   const minorKpis = [
     { label: 'On the bridge', value: String(D.onsite.length), note: D.onsite.length ? 'Awaiting weigh-out' : 'Platform clear' },
-    { label: 'We owe', value: M(oweSup + oweCr), note: 'Soling ' + M(oweSup) + ' · fuel & spares ' + M(oweCr) },
+    { label: 'We owe', value: M(oweCr), note: 'Fuel bunks and spares companies' },
     { label: 'Salary due', value: M(duePay), note: 'Week ending ' + payWeek.slice(5) + ', after advances' },
     { label: 'Expense burn', value: M(burn), note: 'All expenses recorded' },
   ];
@@ -73,11 +72,11 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty, onReport })
     { label: 'Outstanding credit', value: M(outs), note: 'Across every account on terms' },
     { label: 'Salary due', value: M(duePay), note: 'Unpaid for the week ending ' + payWeek },
     { label: 'Expense burn', value: M(burn), note: 'All expenses recorded, net' },
-    { label: 'We owe', value: M(oweSup + oweCr), note: 'Soling ' + M(oweSup) + ' · fuel & spares ' + M(oweCr) },
+    { label: 'We owe', value: M(oweCr), note: 'Fuel bunks and spares companies' },
   ];
 
   const owing = D.customers.filter((c) => d.outstanding(c) > 0);
-  const exposureNote = owing.length ? owing.length + ' of ' + D.customers.length + ' credit parties owe us' : 'No credit party owes anything';
+  const exposureNote = owing.length ? owing.length + ' of ' + D.customers.length + ' customers owe us' : 'No customer owes anything';
   const byOutstanding = D.customers.slice().sort((a, b) => d.outstanding(b) - d.outstanding(a));
 
   // Materials sold on the chosen day (credit and walk-in), in units of 4 tons.
@@ -140,9 +139,9 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty, onReport })
             <Panel
               className="ag-card"
               style={{ minWidth: 0 }}
-              title={'Paid by credit parties ' + dayName}
-              sub={payers.length ? M(collected) + ' from ' + payers.length + ' part' + (payers.length === 1 ? 'y' : 'ies') : 'No credit party paid ' + dayName}
-              action={<button type="button" className="btn btn-ghost" onClick={() => go('customers')}>Credit parties</button>}
+              title={'Paid by customers ' + dayName}
+              sub={payers.length ? M(collected) + ' from ' + payers.length + ' customer' + (payers.length === 1 ? '' : 's') : 'No customer paid ' + dayName}
+              action={<button type="button" className="btn btn-ghost" onClick={() => go('customers')}>Customers</button>}
             >
               <div style={{ padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
                 {payers.map((g) => (
@@ -172,7 +171,7 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty, onReport })
           <Panel
             className="ag-rise"
             title="On the weighbridge now"
-            sub="Open tickets holding a tare weight"
+            sub="Open tickets holding a first weight"
             action={<button type="button" className="btn btn-primary" onClick={() => go('weighbridge')}>Go to station</button>}
           >
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(250px,100%),1fr))', gap: 'var(--space-6)', padding: 'var(--space-6)' }}>
@@ -180,10 +179,10 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty, onReport })
                 <div className="ag-stat" key={v.id} style={{ padding: 'var(--space-6)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 'var(--space-2)' }}>
                     <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 18, letterSpacing: '-0.02em' }}>{v.vehicle}</div>
-                    <Tag cls="ag-t-info">Tare captured</Tag>
+                    <Tag cls={cameInLoaded(v) ? 'ag-t-warn' : 'ag-t-info'}>{cameInLoaded(v) ? 'In loaded' : 'In empty'}</Tag>
                   </div>
                   <div style={{ fontSize: 13, marginTop: 8, fontWeight: 600 }}>{d.cust(v.custId).name}</div>
-                  <div style={{ fontSize: 12, color: 'var(--color-neutral-700)', marginTop: 2 }}>{d.mat(v.matId).name} · tare {N(v.tare)} kg</div>
+                  <div style={{ fontSize: 12, color: 'var(--color-neutral-700)', marginTop: 2 }}>{d.mat(v.matId).name} · {cameInLoaded(v) ? 'gross' : 'tare'} {N(firstWeight(v))} kg</div>
                   <div style={{ fontSize: 11, color: 'var(--color-neutral-600)', marginTop: 6 }}>In at {v.inAt}</div>
                 </div>
               ))}
@@ -239,13 +238,13 @@ export default function Dashboard({ d, tab, setTab, go, onOpenParty, onReport })
             style={{ marginTop: 'var(--space-6)' }}
             title="Account balances"
             sub={exposureNote}
-            action={<button type="button" className="btn btn-primary" onClick={() => go('payments')}>Record payment</button>}
+            action={<button type="button" className="btn btn-primary" onClick={() => go('customers')}>Customers</button>}
           >
             <div style={{ overflowX: 'auto' }}>
               <table className="table" style={{ width: '100%', minWidth: 720 }}>
                 <thead>
                   <tr>
-                    <th>Credit party</th><th style={{ textAlign: 'right' }}>Outstanding</th><th style={{ textAlign: 'right' }}>Billed</th>
+                    <th>Customer</th><th style={{ textAlign: 'right' }}>Outstanding</th><th style={{ textAlign: 'right' }}>Billed</th>
                     <th style={{ textAlign: 'right' }}>Received</th><th>Last receipt</th><th>Standing</th>
                   </tr>
                 </thead>

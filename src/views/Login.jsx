@@ -7,8 +7,6 @@ import '../styles/login.css';
 const PIN_MAX = 6;
 const PIN_RE = /^\d{4,6}$/;
 const MOBILE_RE = /^[6-9]\d{9}$/;
-// Weighbridge indicators step in 20 kg divisions; the readout rounds the same way.
-const DIVISION_KG = 20;
 
 const svg = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
 const Alert = () => <svg {...svg} strokeWidth="2.2" width="13" height="13"><circle cx="12" cy="12" r="10" /><path d="M12 8v5" /><path d="M12 16h.01" /></svg>;
@@ -45,28 +43,21 @@ function shake(el) {
   el.classList.add('ag-shake');
 }
 
-// ── Brand panel: the live bridge readout, the last ticket printed, and today's totals ──
-function BridgePanel({ scaleKg, scaleStable, lastTicket, stats }) {
-  const shown = Math.round((scaleKg || 0) / DIVISION_KG) * DIVISION_KG;
+// ── Brand panel: the last ticket printed and today's totals ──
+function BridgePanel({ lastTicket, stats }) {
   return (
     <aside className="lg-panel" aria-label={settings.companyName + ' weighbridge'}>
+      <div className="lg-scan" aria-hidden="true" />
       <div className="lg-brand"><div className="lg-mark" aria-hidden="true">{brandMark(settings.companyName)}</div><b>{settings.companyName}</b></div>
 
       <div>
         <div className="lg-eyebrow">Weighbridge console</div>
         <h1>Every load, weighed and <em>accounted.</em></h1>
+        <p className="lg-lede">Tare to gross, rate to receipt. One console for the yard, the ledger and the payroll.</p>
       </div>
 
-      <div className="lg-scale">
-        <div className="lg-readout">
-          <div className="lg-ro-top">
-            <span>BRIDGE · LIVE</span>
-            <span className="lg-stable" data-on={scaleStable ? '1' : '0'}><i />{scaleStable ? 'STABLE' : 'SETTLING'}</span>
-          </div>
-          <div className="lg-digits" aria-label={'Bridge weight ' + N(shown) + ' kilograms'}><span>{N(shown)}</span><small>KG</small></div>
-        </div>
-
-        {lastTicket && (
+      {lastTicket && (
+        <div className="lg-scale">
           <div className="lg-slip" aria-label="Last ticket">
             <div className="lg-slip-head"><span>{lastTicket.ticket}</span><span>{lastTicket.time}</span></div>
             <dl>
@@ -77,8 +68,8 @@ function BridgePanel({ scaleKg, scaleStable, lastTicket, stats }) {
             </dl>
             <dl className="lg-net"><dt>Net</dt><dd>{N(Math.max(0, lastTicket.gross - lastTicket.tare))} kg</dd></dl>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="lg-stats ag-stagger">
         {stats.map((p) => <div key={p.label}><b>{p.value}</b><span>{p.label}</span></div>)}
@@ -144,12 +135,16 @@ function PinInput({ id, value, onChange, bad, describedBy, inputRef }) {
 }
 
 // ── Sign in: staff with a PIN, the owner with the password ──
-function SignInPane({ users, onSignIn, reason, cardRef }) {
+// Before anyone exists, the owner pane sets the owner's name and password instead.
+function SignInPane({ users, onSignIn, onCreateOwner, reason, cardRef }) {
   const active = users.filter((u) => u.active !== false);
   const staff = active.filter((u) => u.role !== 'owner');
   const owners = active.filter((u) => u.role === 'owner');
+  const isFirstRun = !users.length;
   const [mode, setMode] = useState(staff.length ? 'staff' : 'owner');
   const [id, setId] = useState('');
+  const [ownerName, setOwnerName] = useState('');
+  const [again, setAgain] = useState('');
   const [secret, setSecret] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [err, setErr] = useState({});
@@ -163,7 +158,24 @@ function SignInPane({ users, onSignIn, reason, cardRef }) {
   const switchMode = (m) => { setMode(m); setId(''); setSecret(''); setErr({}); setShowPw(false); };
   const pickPerson = (pid) => { setId(pid); setSecret(''); setErr({}); if (pinRef.current) pinRef.current.focus(); };
 
+  const createOwner = async () => {
+    if (busy) return;
+    const e = {};
+    if (!ownerName.trim()) e.person = 'Enter the owner name.';
+    if (secret.length < 6) e.secret = 'Use a password of at least 6 characters.';
+    else if (secret !== again) e.secret = 'The two passwords do not match.';
+    if (Object.keys(e).length) { setErr(e); shake(cardRef.current); return; }
+    setBusy(true);
+    try {
+      await onCreateOwner(ownerName.trim(), secret);
+    } catch {
+      setBusy(false);
+      setErr({ secret: 'This browser could not save the password. Open the app from its usual address and try again.' });
+    }
+  };
+
   const attempt = async (value) => {
+    if (isFirstRun) { createOwner(); return; }
     if (busy) return;
     const e = {};
     if (!user) e.person = 'Tap your name first.';
@@ -195,7 +207,7 @@ function SignInPane({ users, onSignIn, reason, cardRef }) {
     <section className="lg-pane ag-rise" id="lg-pane-in" role="tabpanel" aria-labelledby="lg-tab-in">
       <div className="lg-eyebrow">Console access</div>
       <h2>{isOwner ? 'Owner sign-in' : 'Who is working?'}</h2>
-      <p className="lg-sub">{isOwner ? 'Full access: staff rights, approvals, devices and undo.' : 'Tap your name and enter your PIN.'}</p>
+      <p className="lg-sub">{isFirstRun ? 'No owner yet. Set the owner name and password.' : isOwner ? 'Full access: staff rights, approvals and undo.' : 'Tap your name and enter your PIN.'}</p>
       {reason && <div className="lg-notice" role="status">{reason}</div>}
 
       {staff.length > 0 && (
@@ -206,7 +218,22 @@ function SignInPane({ users, onSignIn, reason, cardRef }) {
       )}
 
       <form onSubmit={(e) => { e.preventDefault(); attempt(secret); }} noValidate className="lg-form">
-        {list.length > 1 ? (
+        {isFirstRun ? (
+          <div>
+            <label className="lg-label" htmlFor="lg-owner-name">Owner name</label>
+            <input
+              id="lg-owner-name"
+              className="lg-in"
+              autoComplete="username"
+              autoFocus
+              aria-invalid={err.person ? true : undefined}
+              aria-describedby="lg-e-person"
+              value={ownerName}
+              onChange={(e) => { setOwnerName(e.target.value); setErr({}); }}
+            />
+            <FieldError id="lg-e-person">{err.person}</FieldError>
+          </div>
+        ) : list.length > 1 ? (
           <div>
             <span className="lg-label" id="lg-people-l">{isOwner ? 'Owner' : 'Your name'}</span>
             <PersonPicker people={list} value={user ? user.id : ''} onChange={pickPerson} labelId="lg-people-l" />
@@ -227,8 +254,8 @@ function SignInPane({ users, onSignIn, reason, cardRef }) {
                 id="lg-pw"
                 className="lg-in"
                 type={showPw ? 'text' : 'password'}
-                autoComplete="current-password"
-                autoFocus
+                autoComplete={isFirstRun ? 'new-password' : 'current-password'}
+                autoFocus={!isFirstRun}
                 aria-invalid={err.secret ? true : undefined}
                 aria-describedby="lg-e-secret"
                 value={secret}
@@ -236,6 +263,21 @@ function SignInPane({ users, onSignIn, reason, cardRef }) {
               />
               <button type="button" className="lg-eye" aria-label={showPw ? 'Hide password' : 'Show password'} onClick={() => setShowPw((v) => !v)}><Eye off={showPw} /></button>
             </div>
+            {isFirstRun && (
+              <>
+                <label className="lg-label" htmlFor="lg-pw-again" style={{ marginTop: 'var(--space-3)' }}>Password again</label>
+                <input
+                  id="lg-pw-again"
+                  className="lg-in"
+                  type={showPw ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  aria-invalid={err.secret ? true : undefined}
+                  aria-describedby="lg-e-secret"
+                  value={again}
+                  onChange={(e) => { setAgain(e.target.value); setErr({}); }}
+                />
+              </>
+            )}
             <FieldError id="lg-e-secret">{err.secret}</FieldError>
           </div>
         ) : (
@@ -248,7 +290,7 @@ function SignInPane({ users, onSignIn, reason, cardRef }) {
 
         <button type="submit" className="lg-btn" disabled={busy}>
           {busy && <span className="ag-spin" />}
-          {busy ? (isOwner ? 'Checking password…' : 'Checking PIN…') : user ? 'Sign in as ' + user.name : 'Sign in'}
+          {isFirstRun ? (busy ? 'Saving…' : 'Create owner and sign in') : busy ? (isOwner ? 'Checking password…' : 'Checking PIN…') : user ? 'Sign in as ' + user.name : 'Sign in'}
         </button>
         {!isOwner && <p className="lg-hint">Forgot your PIN? The owner can set a new one under Staff &amp; access.</p>}
       </form>
@@ -371,8 +413,8 @@ function Sent({ req, onBack }) {
   );
 }
 
-// Sign-in screen for an approved device: staff PIN, owner password, or a request for a new sign-in.
-export default function Login({ users, requests = [], onSignIn, onRequestAccess, reason, deviceName, scaleKg, scaleStable, lastTicket, stats = [] }) {
+// Sign-in screen: staff PIN, owner password, or a request for a new sign-in.
+export default function Login({ users, requests = [], onSignIn, onCreateOwner, onRequestAccess, reason, lastTicket, stats = [] }) {
   const [tab, setTab] = useState('in');
   const [sent, setSent] = useState(null);
   const cardRef = useRef(null);
@@ -391,7 +433,7 @@ export default function Login({ users, requests = [], onSignIn, onRequestAccess,
 
   return (
     <div className="pg-login">
-      <BridgePanel scaleKg={scaleKg} scaleStable={scaleStable} lastTicket={lastTicket} stats={stats} />
+      <BridgePanel lastTicket={lastTicket} stats={stats} />
 
       <main className="lg-main">
         <div className="lg-col">
@@ -403,13 +445,10 @@ export default function Login({ users, requests = [], onSignIn, onRequestAccess,
                   <button {...tabProps('up', 'Request access')} />
                 </div>
                 {tab === 'in'
-                  ? <SignInPane users={users} onSignIn={onSignIn} reason={reason} cardRef={cardRef} />
+                  ? <SignInPane users={users} onSignIn={onSignIn} onCreateOwner={onCreateOwner} reason={reason} cardRef={cardRef} />
                   : <RequestPane users={users} requests={requests} onRequestAccess={onRequestAccess} onSent={setSent} cardRef={cardRef} />}
               </>
             )}
-          </div>
-          <div className="lg-foot">
-            <span className="lg-dev"><i />This device is approved{deviceName ? ' · ' + deviceName : ''}</span>
           </div>
         </div>
       </main>

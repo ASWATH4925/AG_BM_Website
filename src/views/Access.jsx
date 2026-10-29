@@ -6,7 +6,7 @@ import { LEVELS, TASKS, TEMPLATES } from '../lib/access';
 const TH = { cursor: 'default' };
 const R = { textAlign: 'right' };
 const ERR = { display: 'block', fontSize: 11.5, color: 'var(--color-accent-700)', fontWeight: 600, marginTop: 3 };
-const TABS = ['Staff & rights', 'Devices', 'Sign-out'];
+const TABS = ['Staff & rights', 'Sign-out'];
 const LEVEL_TONE = { allow: '#1d6b3a', approve: '#8a5207', deny: '#a3241a' };
 const when = (iso) => (iso ? iso.slice(0, 16).replace('T', ' ') : '—');
 
@@ -37,8 +37,8 @@ function LevelPicker({ value, task, onChange }) {
   );
 }
 
-// Owner only: staff sign-ins and what each may do, approved devices, and the idle sign-out time.
-export default function Access({ db, me, thisDevice, onSaveUser, onDevice, onSettings, onAccessRequest }) {
+// Owner only: staff sign-ins and what each may do, and the idle sign-out time.
+export default function Access({ db, me, onSaveUser, onSettings, onAccessRequest }) {
   const [tab, setTab] = useState(TABS[0]);
   const users = db.users || [];
   const staff = users.filter((u) => u.role !== 'owner');
@@ -65,8 +65,6 @@ export default function Access({ db, me, thisDevice, onSaveUser, onDevice, onSet
     const id = await onSaveUser({ ...draft, name: draft.name.trim(), role: 'staff' }, pin);
     setSelId(id); setDraft((x) => ({ ...x, id })); setPin(''); setSaved('Saved.');
   };
-  const order = { pending: 0, approved: 1, revoked: 2 };
-  const devices = (db.devices || []).slice().sort((a, b) => order[a.status] - order[b.status]);
   const requests = (db.accessRequests || []).filter((r) => r.status === 'pending');
 
   return (
@@ -74,7 +72,7 @@ export default function Access({ db, me, thisDevice, onSaveUser, onDevice, onSet
       <div role="tablist" aria-label="Access sections" style={{ display: 'flex', flexWrap: 'wrap', borderBottom: '1px solid rgba(32,30,29,.10)', marginBottom: 'var(--space-6)' }}>
         {TABS.map((t) => (
           <button key={t} type="button" role="tab" aria-selected={tab === t} className="ag-tab" data-on={tab === t ? '1' : '0'} onClick={() => setTab(t)}>
-            {t}{(t === 'Devices' && devices.some((x) => x.status === 'pending')) || (t === 'Staff & rights' && requests.length) ? ' •' : ''}<i />
+            {t}{t === 'Staff & rights' && requests.length ? ' •' : ''}<i />
           </button>
         ))}
       </div>
@@ -83,14 +81,13 @@ export default function Access({ db, me, thisDevice, onSaveUser, onDevice, onSet
         <Panel className="ag-rise" style={{ marginBottom: 'var(--space-6)' }} title="Access requests" sub="People who asked for a sign-in from the sign-in screen. Approving adds them as staff with the rights they asked for; you can change those rights after.">
           <div style={{ overflowX: 'auto' }}>
             <table className="table" style={{ width: '100%', minWidth: 720 }}>
-              <thead><tr><th style={TH}>Name</th><th style={TH}>Mobile</th><th style={TH}>Asked for</th><th style={TH}>From device</th><th style={TH}>When</th><th style={{ ...TH, ...R }}>Decision</th></tr></thead>
+              <thead><tr><th style={TH}>Name</th><th style={TH}>Mobile</th><th style={TH}>Asked for</th><th style={TH}>When</th><th style={{ ...TH, ...R }}>Decision</th></tr></thead>
               <tbody>
                 {requests.map((r) => (
                   <tr key={r.id}>
                     <td><strong>{r.name}</strong><div style={{ fontSize: 11.5, color: 'var(--color-neutral-600)' }}>{r.ref}</div></td>
                     <td className="ag-tabular">+91 {r.phone}</td>
                     <td>{(TEMPLATES[r.template] || {}).l || r.template}</td>
-                    <td>{r.deviceName || '—'}</td>
                     <td className="ag-tabular">{when(r.at)}</td>
                     <td style={R}>
                       <div style={{ display: 'inline-flex', gap: 6 }}>
@@ -180,31 +177,6 @@ export default function Access({ db, me, thisDevice, onSaveUser, onDevice, onSet
             </div>
           </Panel>
         </div>
-      )}
-
-      {tab === 'Devices' && (
-        <Panel className="ag-rise" title="Devices" sub="Every computer and phone must be approved once by the owner. Blocked devices cannot sign in.">
-          <div style={{ overflowX: 'auto' }}>
-            <table className="table" style={{ width: '100%', minWidth: 760 }}>
-              <thead><tr><th style={TH}>Device</th><th style={TH}>Status</th><th style={TH}>Requested</th><th style={TH}>Approved</th><th style={TH}>Last used</th><th style={{ ...TH, ...R }}>Actions</th></tr></thead>
-              <tbody>
-                {devices.map((x) => (
-                  <tr key={x.id}>
-                    <td style={{ fontWeight: 700 }}>{x.name}{x.id === thisDevice ? <span style={{ fontWeight: 400, color: 'var(--color-neutral-600)' }}> · this device</span> : null}</td>
-                    <td><Tag cls={x.status === 'approved' ? 'ag-t-ok' : x.status === 'pending' ? 'ag-t-warn' : 'ag-t-bad'}>{x.status === 'approved' ? 'Approved' : x.status === 'pending' ? 'Waiting' : 'Blocked'}</Tag></td>
-                    <td className="ag-tabular">{when(x.requestedAt)}</td>
-                    <td className="ag-tabular">{when(x.approvedAt)}{x.approvedBy ? ' · ' + x.approvedBy : ''}</td>
-                    <td className="ag-tabular">{when(x.lastUsed)}</td>
-                    <td style={{ ...R, whiteSpace: 'nowrap' }}>
-                      {x.status !== 'approved' && <button type="button" className="btn btn-primary" onClick={() => onDevice(x.id, 'approved')}>Approve</button>}
-                      {x.status !== 'revoked' && x.id !== thisDevice && <button type="button" className="btn btn-ghost" onClick={() => onDevice(x.id, 'revoked')}>Block</button>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
       )}
 
       {tab === 'Sign-out' && (

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Panel from '../components/Panel';
+import Segmented from '../components/Segmented';
 import StatTile from '../components/StatTile';
 import { TODAY } from '../config';
 import { M } from '../lib/format';
@@ -7,16 +8,14 @@ import { M } from '../lib/format';
 const TH = { cursor: 'default' };
 const R = { textAlign: 'right' };
 const monthName = (ym) => new Date(ym + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
-const shiftMonth = (ym, n) => {
-  const [y, m] = ym.split('-').map(Number);
-  const t = new Date(y, m - 1 + n, 1);
-  return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0');
-};
 const num = (v) => (+v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 const ERR = { display: 'block', fontSize: 11, color: 'var(--color-accent-700)', fontWeight: 600, marginTop: 3 };
 
 // EB (one meter): units used and power factor noted every day; at month end, the government (TNEB) and private power bills.
+const VIEWS = [['daily', 'Daily reading'], ['monthly', 'Monthly reading'], ['report', 'Report']];
+
 export default function Electricity({ d, onSaveReading, onDeleteReading, onSaveBill, onDeleteBill, onReport }) {
+  const [view, setView] = useState('daily');
   const [month, setMonth] = useState(TODAY.slice(0, 7));
   const blank = { date: TODAY, units: '', pf: '', remarks: '' };
   const [form, setForm] = useState(blank);
@@ -63,8 +62,26 @@ export default function Electricity({ d, onSaveReading, onDeleteReading, onSaveB
     </label>
   );
 
+  const monthPicker = (
+    <input className="input" type="month" aria-label="Month" value={month} onChange={(e) => e.target.value && setMonth(e.target.value)} style={{ width: 170 }} />
+  );
+  const tiles = (
+    <div className="ag-stagger ag-quad">
+      <StatTile label="Units this month" value={num(units) + ' kWh'} note={readings.length + ' days recorded'} />
+      <StatTile label="Average PF" value={avgPf ? avgPf.toFixed(3) : '—'} note={lowPf ? lowPf + ' day(s) below 0.90' : 'No day below 0.90'} />
+      <StatTile label="Our electricity cost" value={bill ? M(ourCost) : 'Not entered'} note={bill ? 'Bill ' + M(billTotal) + (tharAmt ? ' − Thar plant ' + M(tharAmt) : '') : 'Enter at month end'} />
+      <StatTile label="Our cost per unit" value={bill && ourUnits > 0 ? '₹' + (ourCost / ourUnits).toFixed(2) : '—'} note={tharUnits ? 'Our units ' + num(ourUnits) + ' (Thar ' + num(tharUnits) + ')' : 'Bill ÷ units recorded'} />
+    </div>
+  );
+
   return (
     <section aria-label="Electricity">
+      <div className="ag-fade" style={{ marginBottom: 'var(--space-6)' }}>
+        <Segmented label="Electricity views" value={view} onChange={setView} options={VIEWS.map(([v, l]) => ({ v, l }))} controls={(v) => 'eb-' + v} />
+      </div>
+
+      {view === 'daily' && (
+      <div id="eb-daily" role="tabpanel">
       <Panel className="ag-rise" title="EB reading for the day" sub={existing ? 'A reading for ' + form.date + ' is saved — saving again replaces it' : 'Units used and power factor for the day'}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', alignItems: 'flex-end', padding: 'var(--space-4) var(--space-6) var(--space-6)' }}>
           <label className="field" style={{ flex: '0 1 170px', minWidth: 0 }}>
@@ -88,59 +105,7 @@ export default function Electricity({ d, onSaveReading, onDeleteReading, onSaveB
           <button type="button" className="btn btn-primary" onClick={save}>{existing ? 'Update reading' : 'Save reading'}</button>
         </div>
       </Panel>
-
-      <div className="ag-glass ag-rise" style={{ marginTop: 'var(--space-6)', padding: 'var(--space-4) var(--space-6)', display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', alignItems: 'center' }}>
-        <button type="button" className="btn btn-secondary" onClick={() => setMonth(shiftMonth(month, -1))}>← Previous month</button>
-        <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 17 }}>{monthName(month)}</div>
-        <button type="button" className="btn btn-secondary" onClick={() => setMonth(shiftMonth(month, 1))}>Next month →</button>
-        <button type="button" className="btn btn-primary" style={{ marginLeft: 'auto' }} onClick={() => onReport(month)}>Generate report</button>
-      </div>
-
-      <div className="ag-stagger ag-quad" style={{ marginTop: 'var(--space-6)' }}>
-        <StatTile label="Units this month" value={num(units) + ' kWh'} note={readings.length + ' days recorded'} />
-        <StatTile label="Average PF" value={avgPf ? avgPf.toFixed(3) : '—'} note={lowPf ? lowPf + ' day(s) below 0.90' : 'No day below 0.90'} />
-        <StatTile label="Our electricity cost" value={bill ? M(ourCost) : 'Not entered'} note={bill ? 'Bill ' + M(billTotal) + (tharAmt ? ' − Thar plant ' + M(tharAmt) : '') : 'Enter at month end'} />
-        <StatTile label="Our cost per unit" value={bill && ourUnits > 0 ? '₹' + (ourCost / ourUnits).toFixed(2) : '—'} note={tharUnits ? 'Our units ' + num(ourUnits) + ' (Thar ' + num(tharUnits) + ')' : 'Bill ÷ units recorded'} />
-      </div>
-
-      <Panel
-        className="ag-rise"
-        style={{ marginTop: 'var(--space-6)' }}
-        title={'Month end — ' + monthName(month)}
-        sub="Government (TNEB) and private power amounts for the month, and the Thar plant's units and amount. Our cost in the profit report = bill − Thar plant amount."
-        action={!billForm && (
-          <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
-            <button type="button" className="btn btn-primary" onClick={() => setBillForm(bill ? { govt: bill.govt, private: bill.private, tharUnits: bill.tharUnits || '', tharAmount: bill.tharAmount || '', remarks: bill.remarks || '' } : { govt: '', private: '', tharUnits: '', tharAmount: '', remarks: '' })}>{bill ? 'Edit month end' : 'Enter month end'}</button>
-            {bill && <button type="button" className="btn btn-ghost" onClick={() => onDeleteBill(bill)}>Delete</button>}
-          </div>
-        )}
-      >
-        {billForm ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', alignItems: 'flex-end', padding: 'var(--space-4) var(--space-6) var(--space-6)' }}>
-            {[['Government (TNEB) amount (₹)', 'govt'], ['Private power amount (₹)', 'private'], ['Thar plant — units used (kWh)', 'tharUnits'], ['Thar plant — amount (₹)', 'tharAmount']].map(([label, k]) => (
-              <label key={k} className="field" style={{ flex: '1 1 180px', minWidth: 0 }}>
-                <span className="ag-label ag-field-label">{label}</span>
-                <input className="input" type="number" step="any" value={billForm[k]} onChange={(e) => setBillForm({ ...billForm, [k]: e.target.value })} />
-                {err[k] && <span role="alert" style={ERR}>{err[k]}</span>}
-              </label>
-            ))}
-            <label className="field" style={{ flex: '2 1 220px', minWidth: 0 }}>
-              <span className="ag-label ag-field-label">Remarks</span>
-              <input className="input" value={billForm.remarks} placeholder="Optional — bill no., due date" onChange={(e) => setBillForm({ ...billForm, remarks: e.target.value })} />
-            </label>
-            <button type="button" className="btn btn-primary" onClick={saveBill}>Save bill</button>
-            <button type="button" className="btn btn-ghost" onClick={() => { setBillForm(null); setErr({}); }}>Cancel</button>
-          </div>
-        ) : (
-          <div style={{ padding: 'var(--space-4) var(--space-6) var(--space-6)', fontSize: 13.5 }}>
-            {bill
-              ? <>Government <strong>{M(bill.govt)}</strong> + private <strong>{M(bill.private)}</strong> = <strong>{M(billTotal)}</strong>{(tharAmt || tharUnits) ? <> · Thar plant <strong>{num(tharUnits)} kWh</strong>, <strong>{M(tharAmt)}</strong> · our cost <strong>{M(ourCost)}</strong></> : null}{bill.remarks ? ' · ' + bill.remarks : ''}{bill.by ? <span style={{ color: 'var(--color-neutral-600)' }}> · entered by {bill.by}</span> : null}</>
-              : <span style={{ color: 'var(--color-neutral-700)' }}>No bill entered for this month yet.</span>}
-          </div>
-        )}
-      </Panel>
-
-      <Panel className="ag-rise" style={{ marginTop: 'var(--space-6)' }} title="Daily readings" sub={monthName(month)}>
+      <Panel className="ag-rise" style={{ marginTop: 'var(--space-6)' }} title="Daily readings" sub={monthName(month)} action={monthPicker}>
         <div style={{ overflowX: 'auto' }}>
           <table className="table" style={{ width: '100%', minWidth: 680 }}>
             <thead>
@@ -175,6 +140,70 @@ export default function Electricity({ d, onSaveReading, onDeleteReading, onSaveB
         </div>
         {readings.length === 0 && <div style={{ padding: 'var(--space-6)', fontSize: 13, color: 'var(--color-neutral-700)' }}>No readings for this month yet.</div>}
       </Panel>
+      </div>
+      )}
+
+      {view === 'monthly' && (
+      <div id="eb-monthly" role="tabpanel">
+      {tiles}
+
+      <Panel
+        className="ag-rise"
+        style={{ marginTop: 'var(--space-6)' }}
+        title={'Month end — ' + monthName(month)}
+        sub="Government (TNEB) and private power amounts for the month, and the Thar plant's units and amount. Our cost in the profit report = bill − Thar plant amount."
+        action={(
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-2)' }}>
+            {monthPicker}
+            {!billForm && <>
+            <button type="button" className="btn btn-primary" onClick={() => setBillForm(bill ? { govt: bill.govt, private: bill.private, tharUnits: bill.tharUnits || '', tharAmount: bill.tharAmount || '', remarks: bill.remarks || '' } : { govt: '', private: '', tharUnits: '', tharAmount: '', remarks: '' })}>{bill ? 'Edit month end' : 'Enter month end'}</button>
+            {bill && <button type="button" className="btn btn-ghost" onClick={() => onDeleteBill(bill)}>Delete</button>}
+            </>}
+          </div>
+        )}
+      >
+        {billForm ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-3)', alignItems: 'flex-end', padding: 'var(--space-4) var(--space-6) var(--space-6)' }}>
+            {[['Government (TNEB) amount (₹)', 'govt'], ['Private power amount (₹)', 'private'], ['Thar plant — units used (kWh)', 'tharUnits'], ['Thar plant — amount (₹)', 'tharAmount']].map(([label, k]) => (
+              <label key={k} className="field" style={{ flex: '1 1 180px', minWidth: 0 }}>
+                <span className="ag-label ag-field-label">{label}</span>
+                <input className="input" type="number" step="any" value={billForm[k]} onChange={(e) => setBillForm({ ...billForm, [k]: e.target.value })} />
+                {err[k] && <span role="alert" style={ERR}>{err[k]}</span>}
+              </label>
+            ))}
+            <label className="field" style={{ flex: '2 1 220px', minWidth: 0 }}>
+              <span className="ag-label ag-field-label">Remarks</span>
+              <input className="input" value={billForm.remarks} placeholder="Optional — bill no., due date" onChange={(e) => setBillForm({ ...billForm, remarks: e.target.value })} />
+            </label>
+            <button type="button" className="btn btn-primary" onClick={saveBill}>Save bill</button>
+            <button type="button" className="btn btn-ghost" onClick={() => { setBillForm(null); setErr({}); }}>Cancel</button>
+          </div>
+        ) : (
+          <div style={{ padding: 'var(--space-4) var(--space-6) var(--space-6)', fontSize: 13.5 }}>
+            {bill
+              ? <>Government <strong>{M(bill.govt)}</strong> + private <strong>{M(bill.private)}</strong> = <strong>{M(billTotal)}</strong>{(tharAmt || tharUnits) ? <> · Thar plant <strong>{num(tharUnits)} kWh</strong>, <strong>{M(tharAmt)}</strong> · our cost <strong>{M(ourCost)}</strong></> : null}{bill.remarks ? ' · ' + bill.remarks : ''}{bill.by ? <span style={{ color: 'var(--color-neutral-600)' }}> · entered by {bill.by}</span> : null}</>
+              : <span style={{ color: 'var(--color-neutral-700)' }}>No bill entered for this month yet.</span>}
+          </div>
+        )}
+      </Panel>
+      </div>
+      )}
+
+      {view === 'report' && (
+      <div id="eb-report" role="tabpanel">
+      {tiles}
+      <Panel className="ag-rise" style={{ marginTop: 'var(--space-6)' }} title={'Electricity report — ' + monthName(month)} sub="Daily units and power factor, the month-end bill and the Thar plant share, as a PDF or Excel file.">
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-4) var(--space-6) var(--space-6)' }}>
+          {monthPicker}
+          <button type="button" className="btn btn-primary" onClick={() => onReport(month)}>Generate report</button>
+          <span style={{ fontSize: 12.5, color: 'var(--color-neutral-700)' }}>
+            {readings.length} day(s) recorded · {bill ? 'month-end bill entered' : 'month-end bill not entered yet'}
+          </span>
+        </div>
+      </Panel>
+      </div>
+      )}
+
     </section>
   );
 }

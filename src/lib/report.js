@@ -1,7 +1,7 @@
 import { settings } from '../config';
 import { METHOD_LABEL, paidToLabel } from './payments';
 
-// PDF statements for credit parties and soling suppliers. jsPDF is loaded only when a report is generated.
+// PDF statements for customers. jsPDF is loaded only when a report is generated.
 // The built-in PDF fonts have no ₹ glyph, so amounts are written as "Rs.".
 
 const money = (n) => Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -83,7 +83,7 @@ function loadText(d, o) {
   return t;
 }
 
-const payTo = (d, p, company) => (company && p ? ' -> ' + paidToLabel(p, (id) => d.supplier(id).name, d.creditorName) : '');
+const payTo = (d, p, company) => (company && p ? ' -> ' + paidToLabel(p, d.creditorName) : '');
 
 // type: 'statement' | 'loads' | 'payments'; copy: 'party' hides who received the money, 'company' shows it.
 export async function partyReport({ d, party, type, from, to, copy }) {
@@ -140,7 +140,7 @@ export async function partyReport({ d, party, type, from, to, copy }) {
       head: [head],
       body: pays.map((r) => [
         r.ts, r.kind === 'receipt' ? 'Account receipt' : 'Load ' + r.ref, METHOD_LABEL[r.method] || r.method, money(r.credit),
-        ...(company ? [r.p ? paidToLabel(r.p, (id) => d.supplier(id).name, d.creditorName) : 'Company'] : []),
+        ...(company ? [r.p ? paidToLabel(r.p, d.creditorName) : 'Company'] : []),
         (r.p && r.p.ref) || '', (r.p && r.p.remarks) || '',
       ]),
       foot: [['Total', pays.length + ' payments', '', money(pays.reduce((s, r) => s + r.credit, 0)), ...(company ? [''] : []), '', '']],
@@ -155,7 +155,7 @@ export async function partyReport({ d, party, type, from, to, copy }) {
 // One line per credit party for a period: opening, billed, paid, closing.
 export async function allPartiesReport({ d, from, to }) {
   const { doc, autoTable } = await newDoc('portrait');
-  const y = header(doc, 'Credit parties — balances', ['Period: ' + range(from, to)]);
+  const y = header(doc, 'Customers — balances', ['Period: ' + range(from, to)]);
   const rows = d.db.customers.map((c) => ({ c, L: d.ledger(c.id, from, to) }))
     .filter(({ L }) => L.opening || L.rows.length)
     .sort((a, b) => b.L.closing - a.L.closing);
@@ -168,91 +168,6 @@ export async function allPartiesReport({ d, from, to }) {
   });
   footer(doc);
   doc.save('credit-parties-' + (from || 'start').slice(0, 10) + '-to-' + (to || 'now').slice(0, 10) + '.pdf');
-}
-
-// ---- soling suppliers ----
-const paidBy = (r) => (r.source === 'company' ? 'Company' : r.by);
-
-// type: 'statement' | 'loads' | 'payments' for one soling supplier.
-export async function supplierReport({ d, sup, type, from, to }) {
-  const titles = { statement: 'Soling account statement', loads: 'Soling loads supplied', payments: 'Payments to supplier' };
-  const { doc, autoTable } = await newDoc(type === 'loads' ? 'landscape' : 'portrait');
-  const y = header(doc, titles[type], [
-    'Supplier: ' + sup.name + '  (' + sup.code + ')',
-    [sup.owner && 'Owner: ' + sup.owner, sup.contact && 'Contact: ' + sup.contact, sup.upi && 'UPI: ' + sup.upi].filter(Boolean).join('    '),
-    sup.address && 'Address: ' + sup.address,
-    'Period: ' + range(from, to),
-  ]);
-  const L = d.supLedger(sup.id, from, to);
-
-  if (type === 'statement') {
-    const body = [['', 'Opening balance', '', '', money(L.opening)]];
-    L.rows.forEach((r) => {
-      const text = r.kind === 'pass'
-        ? 'Pass amount' + ((r.x.loadIds || []).length ? ' for ' + r.x.loadIds.map((id) => (d.db.purchases.find((u) => u.id === id) || {}).serial || '?').join(', ') : '') + (r.x.remarks ? ' · ' + r.x.remarks : '')
-        : r.kind === 'load'
-        ? 'Soling ' + r.ref + ' · ' + r.u.vehicle + ' · ' + tons(d.net(r.u)) + ' t x Rs.' + money(d.solRate(r.u).rate) + (+r.u.extra ? ' + extra ' + money(r.u.extra) : '')
-        : 'Paid by ' + paidBy(r) + ' · ' + (METHOD_LABEL[r.method] || r.method) + (r.p.ref ? ' · ' + r.p.ref : '');
-      body.push([r.ts, text, r.debit ? money(r.debit) : '', r.credit ? money(r.credit) : '', money(r.balance)]);
-    });
-    autoTable(doc, {
-      ...TABLE, startY: y,
-      head: [['Date / time', 'Particulars', 'Supplied (Rs.)', 'Paid (Rs.)', 'We owe (Rs.)']],
-      body,
-      foot: [['', 'Totals for the period', money(L.debit), money(L.credit), money(L.closing)]],
-      columnStyles: { 0: { cellWidth: 78 }, 2: { halign: 'right', cellWidth: 70 }, 3: { halign: 'right', cellWidth: 70 }, 4: { halign: 'right', cellWidth: 74 } },
-    });
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.text((L.closing >= 0 ? 'Balance payable: Rs. ' : 'Paid ahead: Rs. ') + money(Math.abs(L.closing)), 40, doc.lastAutoTable.finalY + 22);
-  }
-
-  if (type === 'loads') {
-    const loads = L.rows.filter((r) => r.kind === 'load').map((r) => r.u);
-    const sum = (f) => loads.reduce((s, u) => s + f(u), 0);
-    autoTable(doc, {
-      ...TABLE, startY: y,
-      head: [['Date / time', 'Serial', 'Vehicle', 'Empty kg', 'Loaded kg', 'Net t', 'Rate/t', 'Amount', 'Extra', 'Value', 'Remarks']],
-      body: loads.map((u) => [
-        u.date + ' ' + (u.time || ''), u.serial || '', u.vehicle, String(u.tare), String(u.gross), tons(d.net(u)), money(d.solRate(u).rate),
-        money(d.solAmount(u)), +u.extra ? money(u.extra) : '', money(d.solValue(u)), u.remarks || '',
-      ]),
-      foot: [['Totals', loads.length + ' loads', '', '', '', tons(sum(d.net)), '', money(sum(d.solAmount)), money(sum((u) => +u.extra || 0)), money(sum(d.solValue)), '']],
-      columnStyles: Object.fromEntries([3, 4, 5, 6, 7, 8, 9].map((i) => [i, { halign: 'right' }])),
-    });
-  }
-
-  if (type === 'payments') {
-    const pays = L.rows.filter((r) => r.kind === 'pay');
-    autoTable(doc, {
-      ...TABLE, startY: y,
-      head: [['Date / time', 'Paid by', 'Method', 'Amount (Rs.)', 'Reference', 'Remarks']],
-      body: pays.map((r) => [r.ts, paidBy(r), METHOD_LABEL[r.method] || r.method, money(r.credit), r.p.ref || '', r.p.remarks || '']),
-      foot: [['Total', pays.length + ' payments', '', money(pays.reduce((s, r) => s + r.credit, 0)), '', '']],
-      columnStyles: { 3: { halign: 'right' } },
-    });
-  }
-
-  footer(doc);
-  doc.save(fileSafe(sup.name) + '-soling-' + type + '-' + (from || 'start').slice(0, 10) + '-to-' + (to || 'now').slice(0, 10) + '.pdf');
-}
-
-// One line per soling supplier for a period: opening, supplied, paid, what we owe.
-export async function allSuppliersReport({ d, from, to }) {
-  const { doc, autoTable } = await newDoc('portrait');
-  const y = header(doc, 'Soling suppliers — what we owe', ['Period: ' + range(from, to)]);
-  const rows = (d.db.suppliers || []).map((p) => ({ p, L: d.supLedger(p.id, from, to) }))
-    .filter(({ L }) => L.opening || L.rows.length)
-    .sort((a, b) => b.L.closing - a.L.closing);
-  autoTable(doc, {
-    ...TABLE, startY: y,
-    head: [['Supplier', 'Contact', 'Opening (Rs.)', 'Supplied (Rs.)', 'Paid (Rs.)', 'We owe (Rs.)']],
-    body: rows.map(({ p, L }) => [p.name, p.contact || '', money(L.opening), money(L.debit), money(L.credit), money(L.closing)]),
-    foot: [['Total', rows.length + ' suppliers', ...['opening', 'debit', 'credit', 'closing'].map((k) => money(rows.reduce((s, r) => s + r.L[k], 0)))]],
-    columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
-  });
-  footer(doc);
-  doc.save('soling-suppliers-' + (from || 'start').slice(0, 10) + '-to-' + (to || 'now').slice(0, 10) + '.pdf');
 }
 
 // ---- generic multi-table report (day book, period reports) ----

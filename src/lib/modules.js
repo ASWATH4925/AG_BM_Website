@@ -1,7 +1,7 @@
 import { BOOK_MODES, EXPENSE_HEADS, expenseHead, INCOME_HEADS, modeName } from './books';
 import { OTHER_MATERIAL } from './domain';
 import { createPeople } from './people';
-import { M, N, T } from './format';
+import { M, T } from './format';
 
 export const NAV_GROUPS = ['Operations', 'Masters', 'Finance', 'People', 'Owner'];
 
@@ -9,31 +9,29 @@ export const MODS = {
   dashboard: { label: 'Dashboard', group: 'Operations', title: 'Operations overview', sub: 'Live position across the yard, the ledger and the payroll cycle.' },
   weighbridge: { label: 'Weighbridge', group: 'Operations', title: 'Weighbridge station', sub: 'Capture tare on entry, gross on exit. Net weight and price compute themselves.' },
   import: { label: 'Register Import', group: 'Operations', title: 'Register import', sub: 'Load the weighbridge register, check each row and record how it was paid.' },
-  orders: { label: 'Orders', group: 'Operations', title: 'Orders & transactions', sub: 'Every sale, priced at net tons × the rate per ton in force on its date, with how it was paid.' },
-  purchases: { label: 'Soling Loads', group: 'Operations', title: 'Soling loads', sub: 'Boulders bought from soling suppliers — net tons × the supplier rate on that date, plus any extra charges.' },
+  orders: { label: 'Orders & Soling', group: 'Operations', title: 'Orders & transactions', sub: 'Every sale, priced at net tons × the rate per ton in force on its date, with how it was paid.' },
+  // Shown as the Soling tab of the Orders & Soling page.
+  purchases: { label: 'Soling Loads', group: 'Operations', title: 'Soling loads', sub: 'Boulders bought for crushing — net tons × the rate per ton on the load, plus any extra charges.', hidden: true, navAs: 'orders' },
   eb: { label: 'Electricity (EB)', group: 'Operations', title: 'Electricity (EB)', sub: 'Units and power factor every day; at month end the government and private bill, and the Thar plant share (not our cost).' },
-  voids: { label: 'Voided Entries', group: 'Operations', title: 'Voided entries', sub: 'Everything deleted or cancelled — who did it, when and why. Any entry can be restored.' },
-  customers: { label: 'Credit Parties', group: 'Masters', title: 'Credit parties', sub: 'Everyone who takes material on credit — owner, address, contact and their own ton rates.' },
-  suppliers: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling suppliers', sub: 'Boulder suppliers we buy from and owe money to. Kept apart from credit parties.' },
+  customers: { label: 'Customers', group: 'Masters', title: 'Customers', sub: 'Everyone who takes material on credit — owner, address, contact and their own ton rates.' },
   materials: { label: 'Materials', group: 'Masters', title: 'Materials', sub: 'What we sell and buy, and the standard rate per ton for each period.' },
   // Detail screens, reached from the lists above (not shown in the sidebar).
-  party: { label: 'Credit Parties', group: 'Masters', title: 'Credit party', sub: '', hidden: true, navAs: 'customers' },
-  supplier: { label: 'Soling Suppliers', group: 'Masters', title: 'Soling supplier', sub: '', hidden: true, navAs: 'suppliers' },
+  party: { label: 'Customers', group: 'Masters', title: 'Customer', sub: '', hidden: true, navAs: 'customers' },
   stdrates: { label: 'Materials', group: 'Masters', title: 'Standard rates', sub: 'Rate per ton applied when a party has no rate of its own for that date.', hidden: true, navAs: 'materials' },
-  bunks: { label: 'Fuel Bunks', group: 'Finance', title: 'Fuel bunks', sub: 'Diesel taken on credit — for our vehicles, the tanker, and indents for soling suppliers — and what we owe each bunk.' },
-  vendors: { label: 'Spares & Purchases', group: 'Finance', title: 'Spares & purchases', sub: 'Spares and items bought on credit — bills, payments and what we owe each company.' },
-  creditor: { label: 'Fuel Bunks', group: 'Finance', title: 'Account', sub: '', hidden: true, navAs: 'bunks' },
-  daybook: { label: 'Day Book', group: 'Finance', title: 'Day book', sub: 'Every rupee in and out — cash in hand and bank balance, day by day.' },
-  reports: { label: 'Reports', group: 'Finance', title: 'Reports', sub: 'Sales, collections, soling, expenses and profit for any period — as PDF or Excel — and a full backup.' },
-  payments: { label: 'Payments & Credit', group: 'Finance', title: 'Payments & credit', sub: 'Receipts, outstanding balances and ageing by account.' },
-  expenses: { label: 'Expenses', group: 'Finance', title: 'Expenses', sub: 'Credit and debit entries against the yard.' },
-  employees: { label: 'Employees', group: 'People', title: 'Workers', sub: 'Everyone on daily wages — name, work, phone and daily pay.' },
-  attendance: { label: 'Attendance', group: 'People', title: 'Attendance', sub: 'Mark every worker for the day — present, half day or absent — with remarks. Past days can be edited.' },
-  advances: { label: 'Advances', group: 'People', title: 'Advances', sub: 'Money given to workers ahead of Saturday — taken back from their salary.' },
-  payroll: { label: 'Weekly Salary', group: 'People', title: 'Weekly salary', sub: 'Saturday pay: days worked × daily wage, less this week’s advance and any older advance you recover.' },
+  // Fuel bunks, spares and other expenses share the Finances page as tabs; only Finances is in the sidebar.
+  finances: { label: 'Finances', group: 'Finance', title: 'Finances', sub: '' },
+  bunks: { label: 'Fuel Bunks', group: 'Finance', title: 'Fuel bunks', sub: 'Diesel taken on credit — for our vehicles, the tanker and others — and what we owe each bunk.', hidden: true, navAs: 'finances' },
+  vendors: { label: 'Spares & Purchases', group: 'Finance', title: 'Spares & purchases', sub: 'Spares and items bought on credit — bills, payments and what we owe each company.', hidden: true, navAs: 'finances' },
+  creditor: { label: 'Fuel Bunks', group: 'Finance', title: 'Account', sub: '', hidden: true, navAs: 'finances' },
+  expenses: { label: 'Expenses', group: 'Finance', title: 'Expenses', sub: 'Credit and debit entries against the yard.', hidden: true, navAs: 'finances' },
+  // Attendance, worker details and the salary account share the Employees page as tabs.
+  people: { label: 'Employees', group: 'People', title: 'Employees', sub: '' },
+  employees: { label: 'Employees', group: 'People', title: 'Workers', sub: 'Everyone on daily wages — name, work, phone and daily pay.', hidden: true, navAs: 'people' },
+  attendance: { label: 'Attendance', group: 'People', title: 'Attendance', sub: 'Mark every worker for the day — present, half day or absent — with remarks. Past days can be edited.', hidden: true, navAs: 'people' },
+  advances: { label: 'Salary Account', group: 'People', title: 'Salary account', sub: 'Money given to workers ahead of Saturday — taken back from their salary.', hidden: true, navAs: 'people' },
   approvals: { label: 'Approvals', group: 'Owner', title: 'Approvals', sub: 'Changes staff made that need the owner’s approval before they count.' },
   activity: { label: 'Activity & Undo', group: 'Owner', title: 'Activity & undo', sub: 'Every change, who made it and when — and undo a staff member’s work over a period.' },
-  access: { label: 'Staff & Access', group: 'Owner', title: 'Staff & access', sub: 'Staff sign-ins and what each person may do, approved devices and automatic sign-out.' },
+  access: { label: 'Staff & Access', group: 'Owner', title: 'Staff & access', sub: 'Staff sign-ins and what each person may do and automatic sign-out.' },
 };
 
 const opts = (a) => a.map((x) => ({ v: x, l: x }));
@@ -54,91 +52,63 @@ export function moduleConfig(mod, d) {
   const D = d.db;
   const co = () => D.customers.map((c) => ({ v: c.id, l: c.name }));
   const so = () => D.materials.filter((x) => x.kind !== 'purchase').map((x) => ({ v: x.id, l: x.name }));
-  const linkedSupplier = (c) => (D.suppliers || []).find((p) => p.linkedCustId === c.id);
 
   if (mod === 'customers') return {
-    key: 'customers', add: 'New credit party', statusKey: 'status', statuses: ['All', 'Active', 'On hold'],
+    key: 'customers', add: 'New customer', statusKey: 'status', statuses: ['All', 'Active', 'On hold'],
     cols: [
-      { k: 'code', label: 'Code' }, { k: 'name', label: 'Party' }, { k: 'owner', label: 'Owner' }, { k: 'contact', label: 'Contact' },
-      { k: 'address', label: 'Address' }, { k: '_out', label: 'Outstanding', t: 'money', get: (c) => d.outstanding(c) },
-      { k: '_rc', label: 'Own rates', t: 'num', get: (c) => D.rates.filter((r) => r.custId === c.id).length },
-      { k: '_sp', label: 'Also supplies soling', get: (c) => (linkedSupplier(c) || {}).name || '' },
-      { k: 'status', label: 'Status', t: 'tag' },
+      // Contact, address, own rates and status stay on the customer's own page (Open); the list keeps it short.
+      { k: 'code', label: 'Code' }, { k: 'name', label: 'Customer' }, { k: 'owner', label: 'Owner' },
+      { k: '_out', label: 'Outstanding', t: 'money', get: (c) => d.outstanding(c) },
     ],
-    rowAction: { label: 'Open', kind: 'party' },
+    rowAction: { label: 'Open', kind: 'party' }, rowOpens: true,
     fields: [
-      { k: 'name', label: 'Party name', req: 1, span: 'span 2' }, { k: 'owner', label: 'Owner name' },
+      { k: 'name', label: 'Customer name', req: 1, span: 'span 2' }, { k: 'owner', label: 'Owner name' },
       { k: 'contact', label: 'Contact number', placeholder: '98430 22417' }, { k: 'address', label: 'Address', span: 'span 2' },
       { k: 'gst', label: 'GSTIN' }, { k: 'status', label: 'Status', type: 'select', options: opts(['Active', 'On hold']) },
       { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
     ],
-    validate: (f, id) => ({ ...uniqueName(D.customers, f, id, 'A credit party'), ...checkContact(f) }),
-    foot: (rows) => 'Outstanding on filtered parties: ' + M(rows.reduce((s, c) => s + d.outstanding(c), 0)),
-  };
-
-  if (mod === 'suppliers') return {
-    key: 'suppliers', add: 'New soling supplier', statusKey: 'status', statuses: ['All', 'Active', 'Inactive'],
-    cols: [
-      { k: 'code', label: 'Code' }, { k: 'name', label: 'Supplier' }, { k: 'owner', label: 'Owner' }, { k: 'contact', label: 'Contact' },
-      { k: 'upi', label: 'UPI ID / number' }, { k: 'address', label: 'Address' },
-      { k: '_lc', label: 'Also a credit party', get: (p) => (p.linkedCustId ? d.cust(p.linkedCustId).name : '') },
-      { k: 'status', label: 'Status', t: 'tag' },
-    ],
-    fields: [
-      { k: 'name', label: 'Supplier name', req: 1, span: 'span 2' }, { k: 'owner', label: 'Owner name' },
-      { k: 'contact', label: 'Contact number', placeholder: '98430 22417' },
-      { k: 'upi', label: 'UPI ID / number', hint: 'Where UPI payments to this supplier are sent' },
-      { k: 'address', label: 'Address', span: 'span 2' },
-      { k: 'linkedCustId', label: 'Same person as credit party', type: 'select', options: [{ v: '', l: 'Not linked' }].concat(co()), hint: 'Accounts stay separate; this only links them for reference' },
-      { k: 'status', label: 'Status', type: 'select', options: opts(['Active', 'Inactive']) },
-      { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
-    ],
-    validate: (f, id) => ({ ...uniqueName(D.suppliers, f, id, 'A soling supplier'), ...checkContact(f) }),
-    foot: (rows) => 'We owe the filtered suppliers ' + M(rows.reduce((s, p) => s + Math.max(0, d.owed(p)), 0)),
+    validate: (f, id) => ({ ...uniqueName(D.customers, f, id, 'A customer'), ...checkContact(f) }),
+    foot: (rows) => 'Outstanding on filtered customers: ' + M(rows.reduce((s, c) => s + d.outstanding(c), 0)),
   };
 
   if (mod === 'purchases') {
-    const sp = () => (D.suppliers || []).map((p) => ({ v: p.id, l: p.name }));
+    const names = [...new Set((D.purchases || []).map((u) => u.supplierName).filter(Boolean))].sort();
     return {
       key: 'purchases', add: 'New soling load', dateKey: 'date',
-      statusKey: '_sp', statuses: ['All'].concat((D.suppliers || []).map((p) => p.name)),
+      statusKey: 'supplierName', statuses: ['All'].concat(names),
       cols: [
         { k: 'serial', label: 'Serial' }, { k: 'date', label: 'Date' }, { k: 'time', label: 'Time' },
-        { k: '_sp', label: 'Supplier', get: (u) => d.supplier(u.supplierId).name }, { k: 'vehicle', label: 'Vehicle' },
+        { k: 'supplierName', label: 'Supplier' }, { k: 'vehicle', label: 'Vehicle' },
         { k: '_n', label: 'Net (t)', t: 'num2', get: (u) => d.net(u) }, { k: '_r', label: 'Rate / t', t: 'money', get: (u) => d.solRate(u).rate },
         { k: '_x', label: 'Extra', t: 'money', get: (u) => +u.extra || 0 }, { k: '_v', label: 'Value', t: 'money', get: (u) => d.solValue(u) },
         { k: 'remarks', label: 'Remarks' },
       ],
-      rowAction: { label: 'Supplier', kind: 'supplier' },
       fields: [
         { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'time', label: 'Time', type: 'time' },
-        { k: 'supplierId', label: 'Soling supplier', type: 'select', options: sp(), req: 1 },
+        { k: 'supplierName', label: 'Supplier name', req: 1, hint: 'Who the boulders came from' },
         { k: 'serial', label: 'Register serial / ticket', placeholder: 'CR00001' },
         { k: 'vehicle', label: 'Vehicle number', req: 1 },
         { k: 'tare', label: 'Empty truck (kg)', type: 'number', req: 1, hint: 'Register "Gross" column' },
         { k: 'gross', label: 'Loaded truck (kg)', type: 'number', req: 1, hint: 'Register "Net" column' },
-        { k: 'manualRate', label: 'Manual rate (₹ / ton)', type: 'number', hint: "Leave blank to use the supplier's rate for this date" },
-        { k: 'extra', label: 'Extra charges (₹)', type: 'number', hint: 'Rent, unloading — added to what we owe' },
+        { k: 'manualRate', label: 'Rate (₹ / ton)', type: 'number', req: 1 },
+        { k: 'extra', label: 'Extra charges (₹)', type: 'number', hint: 'Rent, unloading — added to the load value' },
         { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
       ],
       validate: (f) => {
         const e = {};
         if (+f.gross && +f.tare && +f.gross <= +f.tare) e.gross = 'The loaded weight must exceed the empty truck.';
-        const manual = String(f.manualRate ?? '').trim();
-        if (manual && !(+manual > 0)) e.manualRate = 'Enter a rate greater than zero, or leave it blank.';
-        else if (!manual && f.supplierId && f.date && !d.solRateFor(f.supplierId, f.date).rate) e.manualRate = 'No supplier rate covers this date — enter a manual rate or add a rate period.';
+        if (!(+f.manualRate > 0)) e.manualRate = 'Enter the rate per ton.';
         if (String(f.extra ?? '').trim() && !(+f.extra >= 0)) e.extra = 'Enter an amount, or leave it blank.';
         return e;
       },
       calc: (f) => {
-        const u = { supplierId: f.supplierId, date: f.date, manualRate: f.manualRate, tare: +f.tare || 0, gross: +f.gross || 0, extra: f.extra };
-        const r = d.solRate(u);
+        const u = { manualRate: f.manualRate, tare: +f.tare || 0, gross: +f.gross || 0, extra: f.extra };
         return [
           { label: 'Net boulders', value: T(d.net(u)) + ' t' },
-          { label: 'Rate (' + r.src + ')', value: M(r.rate) + ' / t' },
+          { label: 'Rate', value: M(d.solRate(u).rate) + ' / t' },
           { label: 'Material value (net tons × rate)', value: M(d.solAmount(u)) },
           { label: 'Extra charges', value: M(+f.extra || 0) },
-          { label: 'We owe for this load', value: M(d.solValue(u)) },
+          { label: 'Load value', value: M(d.solValue(u)) },
         ];
       },
       foot: (rows) => rows.length + ' load(s) · ' + T(rows.reduce((s, u) => s + d.net(u), 0)) + ' t · value ' + M(rows.reduce((s, u) => s + d.solValue(u), 0)),
@@ -172,31 +142,23 @@ export function moduleConfig(mod, d) {
     foot: (rows) => rows.filter((x) => x.kind !== 'purchase' && x.id !== OTHER_MATERIAL && !d.rateFor('', x.id).card).length + ' sold material(s) without a standard rate today',
   };
 
-  if (mod === 'orders' || mod === 'voids') {
-    const isVoid = mod === 'voids';
+  if (mod === 'orders') {
     return {
-      key: 'orders', add: isVoid ? 'File a void' : 'Manual order entry', dateKey: 'date',
-      statusKey: 'status', statuses: isVoid ? ['All', 'Void'] : ['All', 'In Transit', 'Completed', 'Void'],
-      only: isVoid ? (o) => o.status === 'Void' : (o) => o.status !== 'Void',
-      cols: isVoid
-        ? [
-            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.partyLabel(o) },
-            { k: '_m', label: 'Material', get: (o) => d.matLabel(o) }, { k: 'vehicle', label: 'Vehicle' }, { k: 'reason', label: 'Reason' },
-            { k: 'by', label: 'Voided by' }, { k: 'status', label: 'Status', t: 'tag' },
-          ]
-        : [
-            { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.partyLabel(o) },
-            { k: '_m', label: 'Material', get: (o) => d.matLabel(o) }, { k: 'vehicle', label: 'Vehicle' },
-            { k: '_n', label: 'Net (t)', t: 'num2', get: (o) => d.net(o) }, { k: '_r', label: 'Rate / t', t: 'money', get: (o) => d.orderRate(o).rate },
-            { k: '_a', label: 'Bill', t: 'money', get: (o) => d.billTotal(o) },
-            { k: '_p', label: 'Paid', t: 'money', get: (o) => d.paidOn(o) },
-            { k: '_oc', label: 'On credit', t: 'money', get: (o) => d.onCredit(o) },
-            { k: 'method', label: 'Payment' }, { k: 'status', label: 'Status', t: 'tag' },
-          ],
-      rowAction: isVoid ? undefined : { label: 'Payment', kind: 'pay' },
+      key: 'orders', add: 'Manual order entry', dateKey: 'date',
+      statusKey: 'status', statuses: ['All', 'In Transit', 'Completed', 'Void'],
+      cols: [
+        { k: 'ticket', label: 'Ticket' }, { k: 'date', label: 'Date' }, { k: '_c', label: 'Party', get: (o) => d.partyLabel(o) },
+        { k: '_m', label: 'Material', get: (o) => d.matLabel(o) }, { k: 'vehicle', label: 'Vehicle' },
+        { k: '_n', label: 'Net (t)', t: 'num2', get: (o) => d.net(o) }, { k: '_r', label: 'Rate / t', t: 'money', get: (o) => d.orderRate(o).rate },
+        { k: '_a', label: 'Bill', t: 'money', get: (o) => d.billTotal(o) },
+        { k: '_p', label: 'Paid', t: 'money', get: (o) => d.paidOn(o) },
+        { k: '_oc', label: 'On credit', t: 'money', get: (o) => d.onCredit(o) },
+        { k: 'method', label: 'Payment' }, { k: 'status', label: 'Status', t: 'tag' },
+      ],
+      rowAction: { label: 'Payment', kind: 'pay' },
       fields: [
         { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'time', label: 'Time', type: 'time' },
-        { k: 'custId', label: 'Credit party', type: 'select', options: co(), req: 1, span: 'span 2' },
+        { k: 'custId', label: 'Customer', type: 'select', options: co(), req: 1, span: 'span 2' },
         { k: 'matId', label: 'Material', type: 'select', options: so(), req: 1 },
         { k: 'matName', label: 'Material name', hint: 'Only for Other — type what was loaded' },
         { k: 'vehicle', label: 'Vehicle number', req: 1 },
@@ -229,26 +191,9 @@ export function moduleConfig(mod, d) {
           { label: 'Bill', value: M(d.amount(o) + (+f.gst || 0) + (+f.rent || 0)) },
         ];
       },
-      foot: (rows) => (isVoid
-        ? rows.length + ' voided load(s) · ' + T(rows.reduce((s, o) => s + d.net(o), 0)) + ' t'
-        : 'Filtered tonnage ' + T(rows.reduce((s, o) => s + d.net(o), 0)) + ' t · value ' + M(rows.reduce((s, o) => s + d.amount(o), 0))),
+      foot: (rows) => 'Filtered tonnage ' + T(rows.reduce((s, o) => s + d.net(o), 0)) + ' t · value ' + M(rows.reduce((s, o) => s + d.amount(o), 0)),
     };
   }
-
-  if (mod === 'payments') return {
-    key: 'customers', add: 'Record receipt', statusKey: '_ag', statuses: ['All', 'Clear', 'Due'],
-    cols: [
-      { k: 'name', label: 'Credit party' }, { k: '_b', label: 'Billed', t: 'money', get: (c) => d.billed(c) }, { k: '_rc', label: 'Received', t: 'money', get: (c) => d.received(c) },
-      { k: '_out', label: 'Outstanding', t: 'money', get: (c) => d.outstanding(c) },
-      { k: '_lr', label: 'Last receipt', get: (c) => d.lastReceipt(c) },
-      { k: '_ag', label: 'Standing', t: 'tag', get: (c) => (d.outstanding(c) === 0 ? 'Clear' : 'Due') },
-    ],
-    rowAction: { label: 'Receipt', kind: 'receipt' },
-    fields: [
-      { k: 'name', label: 'Party name', req: 1, span: 'span 2' },
-    ],
-    foot: (rows) => 'Total outstanding: ' + M(rows.reduce((s, c) => s + d.outstanding(c), 0)),
-  };
 
   if (mod === 'bunks' || mod === 'vendors') {
     const bunk = mod === 'bunks';
@@ -279,9 +224,8 @@ export function moduleConfig(mod, d) {
         { k: 'date', label: 'Date', type: 'date', req: 1 }, { k: 'time', label: 'Time', type: 'time' },
         { k: 'creditorId', label: 'Bunk', type: 'select', options: accounts, req: 1 },
         { k: 'billNo', label: 'Slip / indent no.' },
-        { k: 'forType', label: 'Fuel for', type: 'select', options: [{ v: 'own', l: 'Our vehicle' }, { v: 'tanker', l: 'Our tanker' }, { v: 'soling', l: 'Soling supplier (indent on our account)' }, { v: 'other', l: 'Someone else' }] },
+        { k: 'forType', label: 'Fuel for', type: 'select', options: [{ v: 'own', l: 'Our vehicle' }, { v: 'tanker', l: 'Our tanker' }, { v: 'other', l: 'Someone else' }] },
         { k: 'vehicle', label: 'Vehicle number' },
-        { k: 'forSupplierId', label: 'Soling supplier', type: 'select', options: [{ v: '', l: '—' }].concat((D.suppliers || []).map((p) => ({ v: p.id, l: p.name }))), hint: 'Only for an indent — deduct it on their account yourself' },
         { k: 'forName', label: 'Name (someone else)', hint: 'Only when fuel is for someone else' },
         { k: 'litres', label: 'Litres', type: 'number' },
         { k: 'rate', label: 'Price per litre (₹)', type: 'number' },
@@ -302,7 +246,6 @@ export function moduleConfig(mod, d) {
           const byLitres = +f.litres > 0 && +f.rate > 0;
           if (!byLitres && !(+f.amount > 0)) e.amount = 'Enter litres and price per litre, or the amount.';
           if ((+f.litres > 0) !== (+f.rate > 0) && !(+f.amount > 0)) e.rate = 'Enter both litres and price per litre.';
-          if (f.forType === 'soling' && !f.forSupplierId) e.forSupplierId = 'Choose the soling supplier.';
           if (f.forType === 'other' && !String(f.forName || '').trim()) e.forName = 'Type who took the fuel.';
         } else if (String(f.amount ?? '').trim() && !(+f.amount > 0)) e.amount = 'Enter the bill amount.';
         if (String(f.gst ?? '').trim() && !(+f.gst >= 0)) e.gst = 'Enter an amount, or leave it blank.';
@@ -407,23 +350,14 @@ export function listKpis(mod, rows, d) {
       { label: 'On credit', value: M(sum(rows, d.onCredit)), note: rows.filter((o) => d.onCredit(o) > 0).length + ' of ' + rows.length + ' tickets' },
       { label: 'Open in transit', value: String(rows.filter((o) => o.status === 'In Transit').length), note: 'Awaiting delivery confirmation' },
     ],
-    payments: () => [
-      { label: 'Billed', value: M(sum(rows, d.billed)), note: 'Credit tickets, filtered parties' },
-      { label: 'Received', value: M(sum(rows, d.received)), note: 'Receipts on account' },
-      { label: 'Outstanding', value: M(sum(rows, d.outstanding)), note: rows.filter((x) => d.outstanding(x) > 0).length + ' parties' },
-    ],
-    voids: () => [
-      { label: 'Voided loads', value: String(rows.length), note: 'Filtered period' },
-      { label: 'Tonnage reversed', value: T(sum(rows, (o) => (o.load || 0) / 1000)) + ' t', note: 'Returned to stock' },
-    ],
     expenses: () => [
       { label: 'Debit', value: M(debit()), note: 'Money out' },
       { label: 'Credit', value: M(credit()), note: 'Money in' },
       { label: 'Net burn', value: M(debit() - credit()), note: 'Filtered range' },
     ],
     customers: () => [
-      { label: 'Credit parties', value: String(rows.length), note: rows.filter((x) => x.status === 'On hold').length + ' on hold' },
-      { label: 'Outstanding', value: M(sum(rows, d.outstanding)), note: rows.filter((x) => d.outstanding(x) > 0).length + ' parties owe us' },
+      { label: 'Customers', value: String(rows.length), note: rows.filter((x) => x.status === 'On hold').length + ' on hold' },
+      { label: 'Outstanding', value: M(sum(rows, d.outstanding)), note: rows.filter((x) => d.outstanding(x) > 0).length + ' customers owe us' },
       { label: 'With their own rates', value: String(rows.filter((x) => D.rates.some((r) => r.custId === x.id)).length), note: 'Others pay the standard rate' },
       { label: 'Details missing', value: String(rows.filter((x) => !x.owner || !x.contact || !x.address).length), note: 'No owner, contact or address yet' },
     ],
@@ -431,12 +365,7 @@ export function listKpis(mod, rows, d) {
       { label: 'Soling loads', value: String(rows.length), note: 'Filtered period' },
       { label: 'Net boulders', value: T(sum(rows, d.net)) + ' t', note: 'Loaded − empty truck' },
       { label: 'Value', value: M(sum(rows, d.solValue)), note: 'Including extra charges' },
-      { label: 'Without a rate', value: String(rows.filter((u) => !d.solRate(u).rate).length), note: 'Add a supplier rate period' },
-    ],
-    suppliers: () => [
-      { label: 'Soling suppliers', value: String(rows.length), note: rows.filter((x) => x.status !== 'Active').length + ' inactive' },
-      { label: 'With UPI details', value: String(rows.filter((x) => x.upi).length), note: 'Needed for UPI payments' },
-      { label: 'Also credit parties', value: String(rows.filter((x) => x.linkedCustId).length), note: 'Separate accounts, linked' },
+      { label: 'Without a rate', value: String(rows.filter((u) => !d.solRate(u).rate).length), note: 'Edit the load to add its rate' },
     ],
     materials: () => [
       { label: 'Materials', value: String(rows.length), note: rows.filter((x) => x.status === 'Paused').length + ' paused' },

@@ -12,7 +12,7 @@ const methodName = (m) => METHOD_LABEL[m] || m;
 const L = (n) => (+n || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 
 // One fuel bunk or spares company: what we took on credit, what was paid, and what we still owe.
-export default function CreditorDetail({ d, cr, tab, setTab, onBack, onEdit, onAddBill, onEditBill, onDeleteBill, onPay, onDeletePay, onOpenParty, onOpenSupplier, onReport }) {
+export default function CreditorDetail({ d, cr, tab, setTab, onBack, onEdit, onAddBill, onEditBill, onDeleteBill, onPay, onDeletePay, onOpenParty, onReport }) {
   const bunk = cr.kind === 'bunk';
   const TABS = [bunk ? 'Fuel taken' : 'Purchase bills', 'Payments', 'Statement', 'Details'];
   const [range, setRange] = useState({ fromDate: '', fromTime: '', toDate: '', toTime: '' });
@@ -27,7 +27,7 @@ export default function CreditorDetail({ d, cr, tab, setTab, onBack, onEdit, onA
   const byParties = d.creditorPaysOf(cr.id).filter((x) => x.source === 'party');
   const foot = { ...R, padding: '12px 24px' };
   const reportBtn = (type) => <button type="button" className="btn btn-primary" onClick={() => onReport(type, range)}>Generate report</button>;
-  const forLabel = (b) => (b.forType === 'tanker' ? 'Our tanker' : b.forType === 'soling' ? 'Indent · ' + d.supplier(b.forSupplierId).name : b.forType === 'other' ? b.forName || 'Someone else' : 'Our vehicle');
+  const forLabel = (b) => (b.forType === 'tanker' ? 'Our tanker' : b.forType === 'other' ? b.forName || 'Someone else' : 'Our vehicle');
 
   return (
     <section aria-label={cr.name}>
@@ -49,7 +49,7 @@ export default function CreditorDetail({ d, cr, tab, setTab, onBack, onEdit, onA
           <StatTile label={owe < -0.5 ? 'Paid ahead' : 'We owe'} value={M(Math.abs(owe))} note={'Last payment ' + (d.creditorPaysOf(cr.id).map((x) => x.p.date).sort().pop() || '—')} />
           <StatTile label={bunk ? 'Fuel taken' : 'Bills'} value={bunk ? L(sum(allBills, (b) => +b.litres || 0)) + ' L' : String(allBills.length)} note={allBills.length + (bunk ? ' fills' : ' bills') + ' in all'} />
           <StatTile label="Billed" value={M(d.crBilled(cr))} note={bunk ? 'Litres × price, or amount typed' : 'Amount + GST'} />
-          <StatTile label="Paid" value={M(d.crPaid(cr))} note={byParties.length ? M(sum(byParties, (x) => x.p.amount)) + ' paid by credit parties' : 'By the company'} />
+          <StatTile label="Paid" value={M(d.crPaid(cr))} note={byParties.length ? M(sum(byParties, (x) => x.p.amount)) + ' paid by customers' : 'By the company'} />
         </div>
       </div>
 
@@ -91,7 +91,7 @@ export default function CreditorDetail({ d, cr, tab, setTab, onBack, onEdit, onA
                     <td style={{ fontWeight: 600 }}>{b.billNo || '—'}</td>
                     {bunk ? (
                       <>
-                        <td>{b.forType === 'soling' ? <button type="button" className="btn btn-ghost" style={{ padding: '2px 4px' }} onClick={() => onOpenSupplier(b.forSupplierId)}>{forLabel(b)}</button> : forLabel(b)}</td>
+                        <td>{forLabel(b)}</td>
                         <td className="ag-tabular">{b.vehicle || '—'}</td>
                         <td className="ag-tabular" style={R}>{+b.litres ? L(b.litres) : '—'}</td>
                         <td className="ag-tabular" style={R}>{+b.rate ? '₹' + L(b.rate) : '—'}</td>
@@ -174,7 +174,7 @@ export default function CreditorDetail({ d, cr, tab, setTab, onBack, onEdit, onA
           {pays.length === 0 && <Empty>No payments in this period.</Empty>}
           {pays.length > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--space-3)', padding: 'var(--space-3) var(--space-6)', borderTop: '1px solid rgba(32,30,29,.10)', fontSize: 13 }}>
-              <span>{pays.length} payments · ones sent by credit parties are changed on that party&apos;s account</span>
+              <span>{pays.length} payments · ones sent by customers are changed on that party&apos;s account</span>
               <strong className="ag-tabular">{M(sum(pays, (r) => r.credit))}</strong>
             </div>
           )}

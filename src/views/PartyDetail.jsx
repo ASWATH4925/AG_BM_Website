@@ -63,7 +63,7 @@ export function Empty({ children }) {
 
 // One credit party's account: loads, payments, statement, rates and contact details.
 export default function PartyDetail({
-  d, party, tab, setTab, onBack, onEdit, onAddRate, onEndRate, onDeleteRate, onOpenSuppliers,
+  d, party, tab, setTab, onBack, onEdit, onAddRate, onEndRate, onDeleteRate,
   onEditLoad, onPayLoad, onDeleteLoad, onReceipt, onDeleteReceipt, onReport, onAddLoad, showHistory, onDeleteAccount,
 }) {
   const tabs = showHistory ? TABS.concat(['History']) : TABS;
@@ -73,8 +73,6 @@ export default function PartyDetail({
   const L = d.ledger(party.id, from, to);
   const loads = L.rows.filter((r) => r.kind === 'load').map((r) => r.o);
   const pays = L.rows.filter((r) => r.kind === 'pay' || r.kind === 'receipt');
-  const supplier = (d.db.suppliers || []).find((p) => p.linkedCustId === party.id);
-  const supplierName = (id) => d.supplier(id).name;
   const sum = (list, f) => list.reduce((s, x) => s + f(x), 0);
   const current = tab && tabs.includes(tab) ? tab : TABS[0];
   const reportBtn = (type, label) => <button type="button" className="btn btn-primary" onClick={() => onReport(type, range)}>{label}</button>;
@@ -82,7 +80,7 @@ export default function PartyDetail({
 
   return (
     <section aria-label={party.name}>
-      <BackLink label="All credit parties" onClick={onBack} />
+      <BackLink label="All customers" onClick={onBack} />
 
       <div className="ag-glass ag-rise">
         <div className="ag-head ag-head-row" style={{ flexWrap: 'wrap' }}>
@@ -196,7 +194,7 @@ export default function PartyDetail({
                     <td style={{ fontWeight: 600 }}>{r.kind === 'receipt' ? 'Account receipt' : 'Load ' + r.ref}</td>
                     <td>{methodName(r.method)}</td>
                     <td className="ag-tabular" style={{ ...R, fontWeight: 600 }}>{M(r.credit)}</td>
-                    <td>{r.p ? paidToLabel(r.p, supplierName, d.creditorName) : 'Company'}</td>
+                    <td>{r.p ? paidToLabel(r.p, d.creditorName) : 'Company'}</td>
                     <td>{(r.p && r.p.ref) || '—'}</td>
                     <td style={{ whiteSpace: 'normal', minWidth: 160, color: 'var(--color-neutral-700)' }}>{(r.p && r.p.remarks) || '—'}</td>
                     <td style={{ ...R, whiteSpace: 'nowrap' }}>
@@ -242,8 +240,8 @@ export default function PartyDetail({
                     <td className="ag-tabular">{r.ts}</td>
                     <td style={{ whiteSpace: 'normal' }}>
                       {r.kind === 'load' && <>Load <strong>{r.ref}</strong> · {d.matLabel(r.o)} · {T(d.net(r.o))} t × {M(d.orderRate(r.o).rate)}{+r.o.gst ? ' + GST ' + M(r.o.gst) : ''}{+r.o.rent ? ' + rent ' + M(r.o.rent) : ''}</>}
-                      {r.kind === 'pay' && <>Paid on {r.ref} · {methodName(r.method)}{r.p ? ' → ' + paidToLabel(r.p, supplierName, d.creditorName) : ''}</>}
-                      {r.kind === 'receipt' && <>Receipt · {methodName(r.method)}{r.p.ref ? ' · ' + r.p.ref : ''} → {paidToLabel(r.p, supplierName, d.creditorName)}</>}
+                      {r.kind === 'pay' && <>Paid on {r.ref} · {methodName(r.method)}{r.p ? ' → ' + paidToLabel(r.p, d.creditorName) : ''}</>}
+                      {r.kind === 'receipt' && <>Receipt · {methodName(r.method)}{r.p.ref ? ' · ' + r.p.ref : ''} → {paidToLabel(r.p, d.creditorName)}</>}
                       {r.kind === 'round' && <>Round-off on {r.ref}</>}
                     </td>
                     <td className="ag-tabular" style={R}>{r.debit ? M(r.debit) : ''}</td>
@@ -301,12 +299,6 @@ export default function PartyDetail({
             <Info label="Party code" value={party.code} />
             <Info label="Remarks" value={party.remarks} />
           </div>
-          {supplier && (
-            <div style={{ margin: '0 var(--space-6) var(--space-6)', fontSize: 13, padding: '10px 12px', borderRadius: 'var(--ag-r-sm)', background: 'rgba(47,79,212,.07)', border: '1px solid rgba(47,79,212,.2)', color: '#1f3a9e' }}>
-              Also supplies soling as <strong>{supplier.name}</strong> ({supplier.code}). That is a separate account — what we owe them is never set against what they owe us.{' '}
-              <button type="button" className="btn btn-ghost" style={{ padding: '2px 6px' }} onClick={onOpenSuppliers}>Soling suppliers</button>
-            </div>
-          )}
         </Panel>
       )}
     </section>

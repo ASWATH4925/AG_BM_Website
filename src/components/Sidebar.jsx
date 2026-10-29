@@ -87,7 +87,7 @@ export default function Sidebar({ wide, mod, onsiteCount, go, canOpen = () => tr
           </a>
           <button type="button" className="ag-out" onClick={onSignOut} style={{ width: '100%', background: 'none', border: 0, font: 'inherit', cursor: 'pointer' }}>
             <LogOut style={{ flex: '0 0 14px' }} />
-            Sign out
+            Log out
           </button>
         </div>
       </div>

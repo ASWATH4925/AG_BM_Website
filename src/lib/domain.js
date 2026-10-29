@@ -4,6 +4,11 @@ import { isPaidMethod } from './payments';
 const OPEN_END = '9999-12-31';
 export const OTHER_MATERIAL = 'M10';
 
+// An on-site vehicle came in either empty (first weight is tare) or loaded (first weight is gross).
+// Rows saved before this distinction have no `entry` and count as empty.
+export const cameInLoaded = (v) => v.entry === 'loaded';
+export const firstWeight = (v) => (cameInLoaded(v) ? v.gross : v.tare);
+
 export function dayBefore(iso) {
   const d = new Date(iso + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() - 1);
@@ -46,7 +51,6 @@ export function planRate(rates, rec) {
 // Business rules bound to the current database snapshot.
 export function createDomain(db) {
   const cust = (id) => db.customers.find((c) => c.id === id) || { name: '—' };
-  const supplier = (id) => (db.suppliers || []).find((p) => p.id === id) || { name: '—' };
   const mat = (id) => db.materials.find((m) => m.id === id) || { name: '—' };
   const salesMaterials = () => db.materials.filter((m) => m.kind !== 'purchase');
 
@@ -111,53 +115,14 @@ export function createDomain(db) {
     const sum = (k) => inRange.reduce((s, r) => s + r[k], 0);
     return { opening, rows: inRange, debit: sum('debit'), credit: sum('credit'), closing: bal };
   };
-  // ---- soling suppliers: what we owe them ----
-  // A soling load's value = net tons × the supplier's rate on that date (or a manual rate) + any extra charges.
-  const purchases = db.purchases || [];
-  const solRates = db.solRates || [];
-  const solRateFor = (supplierId, date = isoDate()) => {
-    const card = solRates
-      .filter((r) => r.supplierId === supplierId && r.from <= date && (!r.to || date <= r.to))
-      .sort((a, b) => b.from.localeCompare(a.from))[0];
-    return card ? { rate: card.rate, src: 'supplier rate', card } : { rate: 0, src: 'no rate set', card: null };
-  };
-  const solRate = (u) => (+u.manualRate > 0 ? { rate: +u.manualRate, src: 'manual rate' } : solRateFor(u.supplierId, u.date));
+  // ---- soling loads ----
+  // A soling load's value = net tons × the rate per ton recorded on the load + any extra charges.
+  const solRate = (u) => (+u.manualRate > 0 ? { rate: +u.manualRate, src: 'load rate' } : { rate: 0, src: 'no rate set' });
   const solAmount = (u) => net(u) * solRate(u).rate;
   const solValue = (u) => solAmount(u) + (+u.extra || 0);
-  const solLoadsOf = (supplierId) => purchases.filter((u) => u.supplierId === supplierId);
-  // Paid to a supplier: by the company, or by a party / walk-in who sent the money straight to them.
+  // Payments on a voided load no longer count towards anyone's account.
   const voidTickets = new Set(db.orders.filter((o) => o.status === 'Void').map((o) => o.id));
-  const supplierPaysOf = (supplierId) => (db.supPayments || [])
-    .filter((p) => p.supplierId === supplierId)
-    .map((p) => ({ p, source: 'company', by: 'Company' }))
-    .concat(payments
-      .filter((p) => p.toType === 'supplier' && p.supplierId === supplierId && !voidTickets.has(p.ticketId))
-      .map((p) => ({ p, source: 'party', by: p.custId ? cust(p.custId).name : (p.walkIn || 'Walk-in') + ' (walk-in)' })));
-  const supplied = (sup) => solLoadsOf(sup.id).reduce((s, u) => s + solValue(u), 0);
-  // Pass money we pay a soling supplier: added to what we owe; may name the loads it covers.
-  const passesOf = (supplierId) => (db.solPasses || []).filter((x) => x.supplierId === supplierId);
-  const passTotal = (sup) => passesOf(sup.id).reduce((s, x) => s + (+x.amount || 0), 0);
-  const passesForLoad = (loadId) => (db.solPasses || []).filter((x) => (x.loadIds || []).includes(loadId));
-  const paidToSupplier = (sup) => supplierPaysOf(sup.id).reduce((s, x) => s + x.p.amount, 0);
-  // Positive = we owe them; negative = we have paid ahead.
-  const owed = (sup) => supplied(sup) + passTotal(sup) - paidToSupplier(sup);
-  const lastSupplierPay = (sup) => supplierPaysOf(sup.id).map((x) => x.p.date).sort().pop() || '—';
-  const supLedger = (supplierId, from = '', to = '') => {
-    const rows = solLoadsOf(supplierId).map((u) => ({ ts: stamp(u), kind: 'load', u, ref: u.serial || 'Load', debit: solValue(u), credit: 0 }))
-      .concat(passesOf(supplierId).map((x) => ({ ts: stamp(x), kind: 'pass', x, ref: 'Pass', debit: +x.amount || 0, credit: 0 })))
-      .concat(supplierPaysOf(supplierId).map((x) => ({ ts: stamp(x.p), kind: 'pay', p: x.p, source: x.source, by: x.by, method: x.p.method, debit: 0, credit: x.p.amount })));
-    rows.sort((a, b) => a.ts.localeCompare(b.ts) || (a.kind === 'load' ? -1 : 1));
-    let opening = 0;
-    const inRange = [];
-    rows.forEach((r) => {
-      if (from && r.ts < from) opening += r.debit - r.credit;
-      else if (!to || r.ts <= to) inRange.push(r);
-    });
-    let bal = opening;
-    inRange.forEach((r) => { bal += r.debit - r.credit; r.balance = bal; });
-    const sum = (k) => inRange.reduce((s, r) => s + r[k], 0);
-    return { opening, rows: inRange, debit: sum('debit'), credit: sum('credit'), closing: bal };
-  };
+
 
   // ---- fuel bunks and spares companies (we take on credit, pay later) ----
   // A bill's value: the amount typed, else litres × price per litre (fuel); plus any GST.
@@ -190,14 +155,11 @@ export function createDomain(db) {
     const sum = (k) => inRange.reduce((s, r) => s + r[k], 0);
     return { opening, rows: inRange, debit: sum('debit'), credit: sum('credit'), closing: bal };
   };
-  // Fuel a soling supplier took on our account (indent) — shown on their account, deducted by staff by hand.
-  const indentsFor = (supplierId) => (db.crBills || []).filter((b) => b.forType === 'soling' && b.forSupplierId === supplierId);
-
   return {
-    db, cust, supplier, mat, salesMaterials,
-    creditor, creditorName, crBillValue, crBillsOf, creditorPaysOf, crBilled, crPaid, crOwed, crLedger, indentsFor, rateFor, orderRate, matLabel,
+    db, cust, mat, salesMaterials,
+    creditor, creditorName, crBillValue, crBillsOf, creditorPaysOf, crBilled, crPaid, crOwed, crLedger, rateFor, orderRate, matLabel,
     net, amount, extras, billTotal, partyLabel, paymentsFor, receiptsOf, paidOn, onCredit, loadsOf, billed, received, outstanding, lastReceipt, ledger,
-    solRateFor, solRate, solAmount, solValue, solLoadsOf, supplierPaysOf, supplied, passesOf, passTotal, passesForLoad, paidToSupplier, owed, lastSupplierPay, supLedger,
+    solRate, solAmount, solValue,
   };
 }
 

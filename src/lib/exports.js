@@ -9,9 +9,9 @@ export const REPORTS = [
   { v: 'daybook', l: 'Day book', sub: 'Every rupee in and out — cash and bank — with opening and closing balances' },
   { v: 'materials', l: 'Sales by material', sub: 'Units, tons, loads and value for each material' },
   { v: 'paymodes', l: 'Sales by payment mode', sub: 'How sales were paid — cash, UPI, bank, left on credit — plus receipts on account' },
-  { v: 'parties', l: 'Sales by party', sub: 'Loads, value, paid and on credit for each credit party and walk-ins' },
+  { v: 'parties', l: 'Sales by party', sub: 'Loads, value, paid and on credit for each customer and walk-ins' },
   { v: 'collections', l: 'Collections', sub: 'Every payment received, and money parties sent straight to others' },
-  { v: 'soling', l: 'Soling purchases', sub: 'Loads, tons, value and payments for each soling supplier' },
+  { v: 'soling', l: 'Soling purchases', sub: 'Loads, tons and value, by supplier name' },
   { v: 'fuel', l: 'Fuel bunks', sub: 'Fuel taken on credit — litres and amount by bunk, every fill, payments and what we owe' },
   { v: 'spares', l: 'Spares & purchases', sub: 'Purchase bills by company, payments and what we owe' },
   { v: 'eb', l: 'Electricity (EB)', sub: 'Daily units and PF, month-end bills, Thar plant share and our cost' },
@@ -85,7 +85,7 @@ export function buildReport(kind, d, from, to) {
       sections: [{
         fmt: ['', '', '', 'u', 't', 'm', 'm', 'm'],
         head: ['Party', 'Type', 'Loads', 'Units', 'Tons', 'Billed (Rs.)', 'Paid on loads (Rs.)', 'On credit (Rs.)'],
-        body: s.byParty.map((p) => [p.name, p.credit ? 'Credit party' : 'Walk-in', p.loads, units(p.tons), p.tons, p.value, p.paid, p.onCredit]),
+        body: s.byParty.map((p) => [p.name, p.credit ? 'Customer' : 'Walk-in', p.loads, units(p.tons), p.tons, p.value, p.paid, p.onCredit]),
         foot: ['Total', '', s.loads.length, units(s.tons), s.tons, s.value, s.byParty.reduce((a, p) => a + p.paid, 0), s.onCredit],
       }],
     };
@@ -104,7 +104,7 @@ export function buildReport(kind, d, from, to) {
           foot: ['Total', ins.length + ' payments', '', '', ins.reduce((a, f) => a + f.amount, 0), ''],
         },
         {
-          heading: 'Sent straight to soling suppliers or others', fmt: ['', '', '', '', 'm', ''],
+          heading: 'Sent straight to others', fmt: ['', '', '', '', 'm', ''],
           head: ['Date / time', 'Paid by', 'Paid to', 'Mode', 'Amount (Rs.)', 'Reference / remarks'],
           body: b.direct.map((x) => [x.date + ' ' + x.time, x.who, x.to, modeName(x.mode), x.amount, x.ref || x.remarks]),
           foot: ['Total', b.direct.length + ' payments', '', '', b.direct.reduce((a, x) => a + x.amount, 0), ''],
@@ -119,16 +119,16 @@ export function buildReport(kind, d, from, to) {
       title: 'Soling purchases', file: file('soling-purchases'), orientation: 'landscape', lines,
       sections: [
         {
-          heading: 'By supplier', fmt: ['', '', 't', 'm', 'm'],
-          head: ['Supplier', 'Loads', 'Tons', 'Value incl. passes (Rs.)', 'Paid in period (Rs.)'],
-          body: s.bySup.map((g) => [g.name, g.loads, g.tons, g.value, g.paid]),
-          foot: ['Total', s.loads.length, s.tons, s.value, s.paid],
+          heading: 'By supplier', fmt: ['', '', 't', 'm'],
+          head: ['Supplier', 'Loads', 'Tons', 'Value (Rs.)'],
+          body: s.bySup.map((g) => [g.name, g.loads, g.tons, g.value]),
+          foot: ['Total', s.loads.length, s.tons, s.value],
         },
         {
           heading: 'Loads', fmt: ['', '', '', '', 't', 'm', 'm', 'm'],
           head: ['Date / time', 'Serial', 'Supplier', 'Vehicle', 'Tons', 'Rate / t', 'Extra', 'Value (Rs.)'],
           body: s.loads.slice().sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time))
-            .map((u) => [u.date + ' ' + (u.time || ''), u.serial || '', d.supplier(u.supplierId).name, u.vehicle, d.net(u), d.solRate(u).rate, +u.extra || 0, d.solValue(u)]),
+            .map((u) => [u.date + ' ' + (u.time || ''), u.serial || '', u.supplierName || '', u.vehicle, d.net(u), d.solRate(u).rate, +u.extra || 0, d.solValue(u)]),
         },
       ],
     };
@@ -184,7 +184,7 @@ export function buildReport(kind, d, from, to) {
           foot: ['Total sales', t.total],
         },
         {
-          heading: 'Paid by credit parties', fmt: ['', 'm', 'm'],
+          heading: 'Paid by customers', fmt: ['', 'm', 'm'],
           head: ['Party', 'Paid today (Rs.)', 'Still owes (Rs.)'],
           body: Object.entries(paidBy).map(([id, a]) => [d.cust(id).name, a, d.outstanding(d.cust(id))]),
         },
@@ -218,13 +218,13 @@ export function buildReport(kind, d, from, to) {
         {
           heading: 'How the sales were paid', fmt: ['', 'm', ''],
           head: ['Paid by', 'Amount (Rs.)', '% of sales'],
-          body: [row('Cash', t.cash), row('UPI to the company', t.upi), row('UPI sent to suppliers / bunks / others', t.upiOthers), row('Bank / account', t.bank), row('Left on credit', t.credit), row('Round-off', t.roundOff)],
+          body: [row('Cash', t.cash), row('UPI to the company', t.upi), row('UPI sent to bunks / others', t.upiOthers), row('Bank / account', t.bank), row('Left on credit', t.credit), row('Round-off', t.roundOff)],
           foot: ['Total sales billed', t.total, 100],
         },
         {
           heading: 'Also in the period', fmt: ['', 'm'],
           head: ['', 'Amount (Rs.)'],
-          body: [['Received from credit parties on account', t.receipts]],
+          body: [['Received from customers on account', t.receipts]],
         },
       ],
     };
@@ -254,7 +254,7 @@ export function buildReport(kind, d, from, to) {
   if (kind === 'fuel' || kind === 'spares') {
     const bunk = kind === 'fuel';
     const s = creditorSummary(d, bunk ? 'bunk' : 'vendor', from, to);
-    const forLabel = (b) => (b.forType === 'tanker' ? 'Our tanker' : b.forType === 'soling' ? 'Indent - ' + d.supplier(b.forSupplierId).name : b.forType === 'other' ? b.forName || 'Someone else' : 'Our vehicle');
+    const forLabel = (b) => (b.forType === 'tanker' ? 'Our tanker' : b.forType === 'other' ? b.forName || 'Someone else' : 'Our vehicle');
     return {
       title: bunk ? 'Fuel bunks' : 'Spares & purchases', file: file(bunk ? 'fuel' : 'spares'), orientation: 'landscape', lines,
       sections: [
@@ -347,46 +347,6 @@ export async function reportExcel(rep) {
   X.writeFile(wb, rep.file + '.xlsx');
 }
 
-// Backup: every collection on its own sheet (nested values written as JSON).
-export async function exportAll(db, today) {
-  const X = await import('xlsx');
-  const wb = X.utils.book_new();
-  Object.entries(db).forEach(([name, value]) => {
-    const list = Array.isArray(value) ? value : [value || {}];
-    const rows = list.map((r) => Object.fromEntries(Object.entries(r || {}).map(([k, v]) => [k, v && typeof v === 'object' ? JSON.stringify(v) : v])));
-    X.utils.book_append_sheet(wb, X.utils.json_to_sheet(rows.length ? rows : [{}]), name.slice(0, 31));
-  });
-  X.writeFile(wb, 'agbm-backup-' + today + '.xlsx');
-}
-
-// Saturday salary statement: days, earned, this week's advance, overall advance, recovered and net pay per worker.
-// recovers: { empId: amount staff typed } for workers not yet paid.
-export function buildSalaryStatement(P, weekEnd, days, recovers = {}) {
-  const lines = P.weekLines(weekEnd);
-  const short = (iso) => iso.slice(8) + '/' + iso.slice(5, 7);
-  const mark = { Present: 'P', 'Half day': '1/2', Absent: 'A' };
-  const body = lines.map((l) => {
-    const v = l.paid ? l.paid : { ...P.settle(l, recovers[l.emp.id]), earned: l.earned };
-    return [
-      l.emp.name, +l.emp.wage || 0, ...days.map((x) => (l.marks[x] ? mark[l.marks[x].status] : '-')), l.worked, v.earned,
-      l.weekAdv, l.oldDue, v.cutWeek + v.cutOld, Math.max(0, P.advanceDue(l.emp.id) - (l.paid ? 0 : v.cutWeek + v.cutOld)), v.net,
-      l.paid ? 'Paid ' + l.paid.date : 'Due',
-    ];
-  });
-  const total = (i) => body.reduce((s, r) => s + (+r[i] || 0), 0);
-  const n = days.length;
-  return {
-    title: 'Salary statement — week ending ' + weekEnd, file: 'agbm-salary-week-' + weekEnd, orientation: 'landscape',
-    lines: ['Week: ' + days[0] + ' to ' + weekEnd + '  (P present, 1/2 half day, A absent)', 'Advance balance after = all advances still due once this week is paid.'],
-    sections: [{
-      fmt: ['', 'm', ...days.map(() => ''), '', 'm', 'm', 'm', 'm', 'm', 'm', ''],
-      head: ['Worker', 'Wage/day', ...days.map(short), 'Days', 'Earned', 'Week advance', 'Overall advance', 'Recovered', 'Advance balance after', 'Net pay', 'Status'],
-      body,
-      foot: ['Total', '', ...days.map(() => ''), total(n + 2), total(n + 3), total(n + 4), total(n + 5), total(n + 6), total(n + 7), total(n + 8), ''],
-    }],
-  };
-}
-
 // Statement, bills or payments for one fuel bunk or spares company.
 export function buildCreditorReport(d, cr, type, from, to) {
   const bunk = cr.kind === 'bunk';
@@ -396,7 +356,7 @@ export function buildCreditorReport(d, cr, type, from, to) {
     [cr.owner && 'Contact: ' + cr.owner, cr.contact, cr.upi && 'UPI: ' + cr.upi].filter(Boolean).join('    '),
     'Period: ' + period(from, to),
   ].filter(Boolean);
-  const forLabel = (b) => (b.forType === 'tanker' ? 'Our tanker' : b.forType === 'soling' ? 'Indent - ' + d.supplier(b.forSupplierId).name : b.forType === 'other' ? b.forName || 'Someone else' : 'Our vehicle');
+  const forLabel = (b) => (b.forType === 'tanker' ? 'Our tanker' : b.forType === 'other' ? b.forName || 'Someone else' : 'Our vehicle');
   const billText = (b) => (bunk
     ? 'Fuel ' + (b.billNo || '') + ' - ' + forLabel(b) + (b.vehicle ? ' - ' + b.vehicle : '') + (+b.litres ? ' - ' + (+b.litres) + ' L' + (+b.rate ? ' x Rs.' + b.rate : '') : '')
     : 'Bill ' + (b.billNo || '') + ' - ' + (b.items || '') + (+b.gst ? ' + GST ' + b.gst : ''));

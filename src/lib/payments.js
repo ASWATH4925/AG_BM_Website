@@ -1,11 +1,11 @@
 // How a sale was paid: on credit, in one payment, or split across several.
-// A payment line is cash, UPI (sent to a soling supplier, a fuel bunk / spares company, the company or someone else) or into the company's bank account.
+// A payment line is cash, UPI (sent to a fuel bunk / spares company, the company or someone else) or into the company's bank account.
 
 export const PAY_MODES = ['Credit', 'Cash', 'UPI', 'Account', 'Split'];
 export const LINE_METHODS = ['Cash', 'UPI', 'Account'];
 export const METHOD_LABEL = { Credit: 'Credit', Cash: 'Cash', UPI: 'UPI', Account: 'Bank / Account', Split: 'Split' };
 
-export const emptyLine = (method = 'Cash', amount = '') => ({ method, amount, toType: method === 'UPI' ? 'supplier' : 'company', supplierId: '', creditorId: '', toName: '', remarks: '' });
+export const emptyLine = (method = 'Cash', amount = '') => ({ method, amount, toType: 'company', creditorId: '', toName: '', remarks: '' });
 
 export const round2 = (n) => Math.round((+n || 0) * 100) / 100;
 
@@ -24,7 +24,6 @@ export function checkPay(pay, bill, { walkIn }) {
     const a = +l.amount;
     if (!(a > 0)) errors['amount' + i] = 'Enter an amount greater than zero.';
     else paid += a;
-    if (l.method === 'UPI' && l.toType === 'supplier' && !l.supplierId) errors['to' + i] = 'Choose who received it.';
     if (l.method === 'UPI' && l.toType === 'creditor' && !l.creditorId) errors['to' + i] = 'Choose who received it.';
     if (l.method === 'UPI' && l.toType === 'other' && !String(l.toName || '').trim()) errors['to' + i] = 'Type who received it.';
   });
@@ -56,7 +55,6 @@ export function toRecords(pay, ticket, by) {
     date: ticket.date, time: ticket.time || '', ticketId: ticket.id, custId: ticket.custId || '', walkIn: ticket.walkIn || '',
     method: l.method, amount: round2(l.amount),
     toType: l.method === 'UPI' ? l.toType : 'company',
-    supplierId: l.method === 'UPI' && l.toType === 'supplier' ? l.supplierId : '',
     creditorId: l.method === 'UPI' && l.toType === 'creditor' ? l.creditorId : '',
     toName: l.method === 'UPI' && l.toType === 'other' ? String(l.toName).trim() : '',
     remarks: String(l.remarks || '').trim(), by,
@@ -66,15 +64,14 @@ export function toRecords(pay, ticket, by) {
 // Rebuilds the editable payment from a ticket and its stored records.
 export function fromRecords(ticket, records) {
   const lines = records.map((r) => ({
-    method: r.method, amount: r.amount, toType: r.toType || 'company', supplierId: r.supplierId || '', creditorId: r.creditorId || '', toName: r.toName || '', remarks: r.remarks || '',
+    method: r.method, amount: r.amount, toType: r.toType || 'company', creditorId: r.creditorId || '', toName: r.toName || '', remarks: r.remarks || '',
   }));
   const mode = !lines.length ? 'Credit' : lines.length > 1 ? 'Split' : lines[0].method;
   return { mode, lines, roundOff: ticket.roundOff ? String(ticket.roundOff) : '', remarks: ticket.payRemarks || '' };
 }
 
 // Where a payment went, for the company's own view. creditorName gives a fuel bunk's or spares company's name and kind.
-export function paidToLabel(r, supplierName, creditorName = () => '—') {
-  if (r.toType === 'supplier') return supplierName(r.supplierId) + ' (soling)';
+export function paidToLabel(r, creditorName = () => '—') {
   if (r.toType === 'creditor') return creditorName(r.creditorId);
   if (r.toType === 'other') return r.toName + ' (other)';
   if (r.method === 'UPI') return 'Company UPI';

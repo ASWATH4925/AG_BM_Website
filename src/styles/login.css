@@ -7,7 +7,7 @@
   --lg-led:var(--color-accent-500); --lg-led-glow:rgba(255,86,60,.18); --lg-ok:#2c6b12;
   --lg-mono:ui-monospace,"SFMono-Regular","Cascadia Mono",Menlo,Consolas,monospace;
   min-height:100vh; display:grid; grid-template-columns:minmax(0,44fr) minmax(0,56fr);
-  background:var(--color-bg); color:var(--color-text); font-family:var(--font-body); letter-spacing:-0.011em;
+  background:linear-gradient(157deg,#fcfbfa 0%,#f3f2f2 38%,#e9e5e3 74%,#ded8d5 100%); color:var(--color-text); font-family:var(--font-body); letter-spacing:-0.011em;
   -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
 }
 .pg-login, .pg-login *{ box-sizing:border-box }
@@ -31,11 +31,16 @@
 
 /* ── Panel ── */
 .lg-panel{ position:relative; overflow:hidden; display:flex; flex-direction:column; justify-content:space-between; gap:36px;
-  background:var(--lg-panel); color:var(--color-neutral-100); padding:40px 44px }
-.lg-panel::before{ content:""; position:absolute; inset:0; pointer-events:none; opacity:.5;
-  background-image:linear-gradient(var(--lg-panel-line) 1px,transparent 1px); background-size:100% 56px;
-  mask-image:linear-gradient(180deg,transparent,#000 30%,#000 70%,transparent); -webkit-mask-image:linear-gradient(180deg,transparent,#000 30%,#000 70%,transparent) }
+  background:var(--lg-panel); color:var(--color-neutral-100); padding:40px 44px;
+  /* Slanted right edge: narrower at the top (brand + headline only), full width at the bottom where the readout and stats reach the edge. */
+  --lg-slant:56px; clip-path:polygon(0 0,calc(100% - var(--lg-slant)) 0,100% 100%,0 100%) }
+/* Red scan line sweeping left to right across the panel. */
+@keyframes lg-scan{ 0%{transform:translateX(-60%);opacity:0} 12%{opacity:.5} 88%{opacity:.5} 100%{transform:translateX(1400%);opacity:0} }
 .lg-panel>*{ position:relative }
+.lg-panel>.lg-scan{ position:absolute; top:0; bottom:0; left:0; width:22%; pointer-events:none;
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--color-accent) 34%,transparent),transparent);
+  animation:lg-scan 6s var(--lg-ease) infinite }
+.lg-lede{ font-size:14.5px; line-height:1.55; color:var(--color-neutral-400); margin:18px 0 0; max-width:38ch; text-wrap:pretty }
 .lg-brand{ display:flex; align-items:center; gap:11px }
 .lg-brand b{ font-family:var(--font-heading); font-weight:800; font-size:15.5px; letter-spacing:-0.02em }
 .lg-mark{ width:34px; height:34px; flex:0 0 34px; border-radius:var(--lg-r-sm); background:var(--color-accent); color:#fff; display:grid; place-items:center;
@@ -47,16 +52,6 @@
 .lg-panel h1 em{ font-style:normal; color:var(--lg-led) }
 
 .lg-scale{ display:grid; gap:14px }
-.lg-readout{ background:var(--lg-panel-2); border:1px solid var(--lg-panel-line); border-radius:var(--lg-r); padding:16px 18px 14px }
-.lg-ro-top{ display:flex; justify-content:space-between; align-items:center; gap:12px; font:500 11px/1 var(--lg-mono); letter-spacing:.04em; color:var(--color-neutral-400) }
-.lg-stable{ display:inline-flex; align-items:center; gap:6px; transition:color .3s }
-.lg-stable i{ width:7px; height:7px; border-radius:50%; background:var(--color-neutral-500); transition:background .3s, box-shadow .3s }
-.lg-stable[data-on="1"]{ color:var(--color-neutral-100) }
-.lg-stable[data-on="1"] i{ background:#7bd35a; box-shadow:0 0 0 3px rgba(123,211,90,.18) }
-.lg-digits{ display:flex; align-items:baseline; justify-content:flex-end; gap:10px; margin-top:10px; color:var(--lg-led);
-  font:700 clamp(40px,4.6vw,62px)/1 var(--lg-mono); letter-spacing:-0.02em; font-variant-numeric:tabular-nums; text-shadow:0 0 22px var(--lg-led-glow) }
-.lg-digits small{ font-size:.32em; color:var(--color-neutral-400); text-shadow:none; letter-spacing:.04em }
-
 .lg-slip{ background:var(--color-neutral-100); color:var(--color-neutral-900); border-radius:4px; padding:14px 16px 20px; font:500 11.5px/1.55 var(--lg-mono);
   -webkit-mask:radial-gradient(circle 5px at 50% 100%,transparent 98%,#000) 0 0/12px 100% repeat-x; mask:radial-gradient(circle 5px at 50% 100%,transparent 98%,#000) 0 0/12px 100% repeat-x }
 .lg-slip-head{ display:flex; justify-content:space-between; gap:10px; font-weight:700; letter-spacing:.04em; padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed rgba(45,43,43,.35) }
@@ -72,11 +67,11 @@
 .lg-stats span{ display:block; margin-top:6px; font-size:10px; letter-spacing:.12em; text-transform:uppercase; font-weight:700; color:var(--color-neutral-400) }
 
 /* ── Main column ── */
-.lg-main{ display:grid; place-items:center; padding:40px 24px;
-  background:radial-gradient(120% 80% at 100% 0%,var(--color-accent-100),transparent 55%),linear-gradient(157deg,#fcfbfa 0%,#f3f2f2 45%,#e9e5e3 100%) }
+.lg-main{ display:grid; place-items:center; padding:44px 24px }
 .lg-col{ width:min(420px,100%); display:grid; gap:18px }
-.lg-card{ background:var(--lg-surface); border:1px solid var(--lg-line); border-radius:var(--lg-r); padding:8px 8px 28px;
-  box-shadow:0 1px 2px rgba(32,30,29,.05),0 18px 40px -24px rgba(32,30,29,.35) }
+.lg-card{ border:1px solid rgba(255,255,255,.85); border-radius:var(--lg-r); padding:8px 8px 28px;
+  background:rgba(255,255,255,.66); backdrop-filter:blur(22px) saturate(1.5); -webkit-backdrop-filter:blur(22px) saturate(1.5);
+  box-shadow:0 1px 2px rgba(32,30,29,.05),0 10px 30px -16px rgba(32,30,29,.22) }
 
 .lg-tabs{ display:grid; grid-template-columns:1fr 1fr; gap:4px; padding:4px; border-radius:calc(var(--lg-r) - 4px); background:rgba(32,30,29,.06) }
 .lg-tab{ height:40px; border:0; border-radius:var(--lg-r-sm); background:transparent; font-size:13.5px; font-weight:650; color:var(--color-neutral-700); cursor:pointer;
@@ -158,17 +153,13 @@
 .lg-receipt dt{ color:var(--color-neutral-700) }
 .lg-receipt dd{ margin:0; text-align:right; overflow-wrap:anywhere }
 
-.lg-foot{ display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px 14px; font-size:12px; color:var(--color-neutral-700) }
-.lg-dev{ display:inline-flex; align-items:center; gap:7px }
-.lg-dev i{ width:7px; height:7px; border-radius:50%; background:var(--lg-ok) }
 
 /* Phones and narrow windows: the panel becomes a compact band with the brand, headline and live readout. */
 @media (max-width:880px){
   .pg-login{ grid-template-columns:1fr }
-  .lg-panel{ gap:20px; padding:24px 16px 26px }
+  .lg-panel{ gap:20px; padding:24px 16px 26px; clip-path:none }
   .lg-panel h1{ font-size:30px; max-width:16ch }
   .lg-slip, .lg-stats{ display:none }
-  .lg-digits{ font-size:40px }
   .lg-main{ place-items:start center; padding:24px 16px 36px }
 }
 @media (max-width:420px){

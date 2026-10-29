@@ -7,43 +7,38 @@ import PaymentEditor from './components/PaymentEditor';
 import { SEED_NEXT_TICKET, seedDb, upgradeDb } from './data/seed';
 import { checkPay, defaultPay, emptyLine, fromRecords, isPaidMethod, METHOD_LABEL, paidToLabel, round2, toRecords } from './lib/payments';
 import { matchMaterial, normalName, parseRegister } from './lib/register';
-import SolingSuppliers from './views/SolingSuppliers';
-import SupplierDetail from './views/SupplierDetail';
 import RegisterImport, { rowBill, saleStatus, solingStatus } from './views/RegisterImport';
-import { createDomain, OTHER_MATERIAL, periodLabel, planRate } from './lib/domain';
+import { createDomain, firstWeight, OTHER_MATERIAL, periodLabel, planRate } from './lib/domain';
 import { hhmm, isoDate, M, N, T } from './lib/format';
 import { onEnterKey } from './lib/enterNav';
 import {
-  applyOps, canOpen, conflicts, describe, deviceGuess, deviceId, diffDb, hashSecret, levelOf, newSalt, strictest, taskLabel, tasksFor, TEMPLATES,
+  applyOps, canOpen, conflicts, PAGE_GROUPS, describe, diffDb, hashSecret, levelOf, newSalt, strictest, taskLabel, tasksFor, TEMPLATES,
 } from './lib/access';
 import Access from './views/Access';
 import Activity, { Approvals } from './views/Activity';
-import { DeviceGate, SetupOwner } from './views/Lock';
 import { MODS, moduleConfig } from './lib/modules';
 import { loadSaved, save as saveToBrowser } from './lib/storage';
-import CreditParties from './views/CreditParties';
 import Attendance from './views/Attendance';
 import CreditorDetail from './views/CreditorDetail';
 import Creditors from './views/Creditors';
 import Dashboard from './views/Dashboard';
 import Electricity from './views/Electricity';
-import DayBook from './views/DayBook';
-import Reports from './views/Reports';
-import Salary from './views/Salary';
-import { createPeople, weekDays } from './lib/people';
+import { createPeople } from './lib/people';
 import ListModule from './views/ListModule';
+import Segmented from './components/Segmented';
 import Login from './views/Login';
 import PartyDetail, { StandardRates } from './views/PartyDetail';
 import Profile from './views/Profile';
-import VoidedEntries from './views/VoidedEntries';
 import Weighbridge from './views/Weighbridge';
 
 const NUMERIC_FIELDS = ['rate', 'manualRate', 'amount', 'wage', 'tare', 'gross', 'days', 'ot', 'recovered', 'received', 'gst', 'rent', 'extra', 'litres'];
 const FILTERS_CLEAR = { q: '', status: 'All', from: '', to: '', sortK: null };
 const RECEIPT_METHODS = ['Cash', 'UPI', 'Account', 'Cheque'].map((x) => ({ v: x, l: METHOD_LABEL[x] || x }));
 // Modules drawn by their own view instead of the generic list (their config still drives add/edit forms).
-const CUSTOM_LISTS = ['customers', 'suppliers', 'voids', 'bunks', 'vendors'];
-const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'supplier', 'stdrates', 'import', 'daybook', 'reports', 'attendance', 'payroll', 'creditor', 'eb', 'access', 'activity', 'approvals'];
+const CUSTOM_LISTS = ['bunks', 'vendors'];
+// Tab names on grouped pages (Finances, Employees), in the order PAGE_GROUPS lists them.
+const TAB_LABEL = { bunks: 'Fuel Bunks', vendors: 'Spares', expenses: 'Other', attendance: 'Attendance', employees: 'Info', advances: 'Salary' };
+const DETAIL_VIEWS = ['dashboard', 'weighbridge', 'party', 'stdrates', 'import', 'attendance', 'creditor', 'eb', 'access', 'activity', 'approvals'];
 // The person signed in; records are stamped with this name.
 const actor = { name: 'System' };
 
@@ -57,11 +52,11 @@ function initialState() {
   const saved = loadSaved();
   const db = saved ? upgradeDb(saved.db) : seedDb();
   return {
-    mod: 'dashboard', dashTab: 'Overview', now: new Date(), partyId: null, partyTab: 'Rates', supplierId: null, supplierTab: 'Loads supplied', creditorId: null, creditorTab: '',
+    mod: 'dashboard', dashTab: 'Overview', now: new Date(), partyId: null, partyTab: 'Rates', creditorId: null, creditorTab: '',
     ...FILTERS_CLEAR, sortDir: 1,
     modal: null, form: {}, errors: {}, toast: null, wide: isWide(), payEdit: null,
     scale: IDLE_SCALE_KG, target: IDLE_SCALE_KG,
-    wb: { vehicle: '', custId: db.customers[0] ? db.customers[0].id : '', matId: 'M06', outId: null, err: '' },
+    wb: { vehicle: '', custId: db.customers[0] ? db.customers[0].id : '', matId: 'M06', empty: true, outId: null, err: '' },
     seq: saved ? saved.seq : SEED_NEXT_TICKET,
     db,
   };
@@ -100,7 +95,6 @@ export default function App() {
   const lastBlock = useRef(0);
   const [session, setSession] = useState(readSession);
   const [lockReason, setLockReason] = useState('');
-  const devId = useMemo(deviceId, []);
 
   // Every change to the books goes through here: it is checked against the signed-in person's rights,
   // recorded in the activity log, sent to the owner for approval, or refused.
@@ -138,7 +132,7 @@ export default function App() {
     setS((st) => ({ ...st, ...out }));
     return applied;
   }, []);
-  // Owner / system changes that are not checked (sign-in, devices, approvals, undo).
+  // Owner / system changes that are not checked (sign-in, approvals, undo).
   const setRaw = (patch) => { bypass.current = true; try { set(patch); } finally { bypass.current = false; } };
   const d = useMemo(() => createDomain(s.db), [s.db]);
   const P = useMemo(() => createPeople(s.db), [s.db]);
@@ -191,7 +185,6 @@ export default function App() {
   const me = session ? users.find((u) => u.id === session.userId && u.active !== false) || null : null;
   meRef.current = me;
   actor.name = me ? me.name : 'System';
-  const thisDevice = (s.db.devices || []).find((x) => x.id === devId);
   const idleMinutes = me ? (+((s.db.settings || {})[me.role === 'owner' ? 'idleOwner' : 'idleStaff']) || (me.role === 'owner' ? 60 : 15)) : 15;
 
   const signOut = (reason) => { writeSession(null); setSession(null); setLockReason(reason || ''); set({ mod: 'dashboard', modal: null, payEdit: null }); };
@@ -212,19 +205,12 @@ export default function App() {
     const v = { userId: u.id, lastActive: Date.now() };
     writeSession(v); setSession(v); setLockReason('');
     const at = new Date().toISOString();
-    setRaw((st) => ({
-      db: {
-        ...st.db,
-        users: (st.db.users || []).map((x) => (x.id === u.id ? { ...x, lastSignIn: at } : x)),
-        devices: (st.db.devices || []).map((x) => (x.id === devId ? { ...x, lastUsed: at } : x)),
-      },
-    }));
+    setRaw((st) => ({ db: { ...st.db, users: (st.db.users || []).map((x) => (x.id === u.id ? { ...x, lastSignIn: at } : x)) } }));
   };
   const createOwner = async (name, password) => {
     const salt = newSalt();
     const owner = { id: 'U' + Date.now(), name, phone: '', role: 'owner', salt, secretHash: await hashSecret(password, salt), active: true, perms: {} };
-    const at = new Date().toISOString();
-    setRaw((st) => ({ db: { ...st.db, users: [owner], devices: [{ id: devId, name: deviceGuess(), status: 'approved', requestedAt: at, approvedAt: at, approvedBy: name }] } }));
+    setRaw((st) => ({ db: { ...st.db, users: [owner] } }));
     startSession(owner);
   };
   const signIn = async (id, secret) => {
@@ -233,26 +219,6 @@ export default function App() {
     startSession(u);
     return true;
   };
-  const upsertDevice = (patch) => setRaw((st) => {
-    const list = st.db.devices || [];
-    const was = list.find((x) => x.id === devId);
-    return { db: { ...st.db, devices: was ? list.map((x) => (x.id === devId ? { ...x, ...patch } : x)) : list.concat([{ id: devId, requestedAt: new Date().toISOString(), ...patch }]) } };
-  });
-  const requestDevice = (name) => upsertDevice({ name, status: 'pending' });
-  const ownerApproveDevice = async (password, name) => {
-    const owners = users.filter((u) => u.role === 'owner');
-    for (const o of owners) {
-      // eslint-disable-next-line no-await-in-loop
-      if (await verify(o, password)) {
-        upsertDevice({ name, status: 'approved', approvedAt: new Date().toISOString(), approvedBy: o.name });
-        return true;
-      }
-    }
-    return false;
-  };
-  const setDeviceStatus = (id, status) => setRaw((st) => ({
-    db: { ...st.db, devices: (st.db.devices || []).map((x) => (x.id === id ? { ...x, status, ...(status === 'approved' ? { approvedAt: new Date().toISOString(), approvedBy: me.name } : {}) } : x)) },
-  }));
   const saveUser = async (u, pin) => {
     const id = u.id || 'U' + Date.now();
     let rec = { ...u, id };
@@ -269,7 +235,7 @@ export default function App() {
     const salt = newSalt();
     const req = {
       id: 'AR' + Date.now(), ref: 'REQ-' + String(Date.now()).slice(-5), name, phone, template, salt, secretHash: await hashSecret(pin, salt),
-      deviceId: devId, deviceName: thisDevice ? thisDevice.name : deviceGuess(), at: new Date().toISOString(), status: 'pending',
+      at: new Date().toISOString(), status: 'pending',
     };
     setRaw((st) => ({ db: { ...st.db, accessRequests: (st.db.accessRequests || []).concat([req]) } }));
     return req;
@@ -315,24 +281,18 @@ export default function App() {
     if (!chosen.length) return;
     const at = new Date().toISOString();
     let db = s.db;
-    const removed = {};
     let skipped = 0;
     chosen.forEach((a) => {
       a.ops.slice().reverse().forEach((o) => {
+        if (o.coll === 'voided') return; // archive from older saves; no longer kept
         if (conflicts(db, [o], true).length) { skipped += 1; return; }
-        if (o.op === 'add') {
-          db = applyOps(db, [{ coll: o.coll, op: 'del', id: o.id }]);
-          if (o.coll !== 'voided') (removed[o.coll] = removed[o.coll] || []).push(o.after);
-        } else if (o.op === 'del') db = applyOps(db, [{ coll: o.coll, op: 'add', id: o.id, after: o.before }]);
+        if (o.op === 'add') db = applyOps(db, [{ coll: o.coll, op: 'del', id: o.id }]);
+        else if (o.op === 'del') db = applyOps(db, [{ coll: o.coll, op: 'add', id: o.id, after: o.before }]);
         else if (o.op === 'upd') db = applyOps(db, [{ coll: o.coll, op: 'upd', id: o.id, after: o.before }]);
         else db = applyOps(db, [{ coll: o.coll, op: 'set', after: o.before }]);
       });
     });
     const who = [...new Set(chosen.map((a) => a.userName))].join(', ');
-    if (Object.keys(removed).length) {
-      const count = Object.values(removed).reduce((n, l) => n + l.length, 0);
-      db = { ...db, voided: [{ id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: me.name, reason: 'Undone by owner — work of ' + who, kind: 'Undo', label: count + ' item(s) added by ' + who, amount: null, records: removed }].concat(db.voided || []) };
-    }
     const ops = diffDb(s.db, db);
     const entry = { id: 'AU' + Date.now(), at, userId: me.id, userName: me.name, keys: [], label: 'Undid ' + chosen.length + ' change(s) by ' + who, ops, rollback: true };
     const audit = (db.audit || []).map((a) => (ids.includes(a.id) ? { ...a, rolledBack: { at, by: me.name } } : a)).concat([entry]);
@@ -340,7 +300,9 @@ export default function App() {
     toast('Undid ' + chosen.length + ' change(s) by ' + who + (skipped ? ' — ' + skipped + ' record(s) skipped because they were changed since.' : '.'));
   };
 
-  const go = (mod) => {
+  const go = (target) => {
+    // A page made of tabs (Finances, Employees) opens its first tab this person may use.
+    const mod = PAGE_GROUPS[target] ? PAGE_GROUPS[target].find((t) => canOpen(meRef.current, t)) || target : target;
     if (!canOpen(meRef.current, mod)) { toast('You do not have access to that page.'); return; }
     set({ mod, ...FILTERS_CLEAR, modal: null });
   };
@@ -351,35 +313,46 @@ export default function App() {
   const captureTare = () => {
     const wb = s.wb;
     const vehicle = wb.vehicle.trim();
-    if (!vehicle) return setWb({ err: 'Enter the vehicle number before capturing tare.' });
+    const empty = wb.empty !== false;
+    const kind = empty ? 'tare' : 'gross';
+    if (!vehicle) return setWb({ err: 'Enter the vehicle number before capturing ' + kind + '.' });
     if (s.db.onsite.some((v) => v.vehicle.toLowerCase() === vehicle.toLowerCase())) return setWb({ err: 'That vehicle is already on site awaiting weigh-out.' });
-    if (!wb.custId) return setWb({ err: 'Choose the credit party first.' });
+    if (!wb.custId) return setWb({ err: 'Choose the customer first.' });
     const ticket = 'WB-' + s.seq;
-    const row = {
-      id: 'S' + Date.now(), ticket, vehicle: vehicle.toUpperCase(), custId: wb.custId, matId: wb.matId, tare: s.scale,
-      load: 15000 + Math.round(Math.random() * 5000), inAt: hhmm(),
-    };
+    const base = { id: 'S' + Date.now(), ticket, vehicle: vehicle.toUpperCase(), custId: wb.custId, matId: wb.matId, inAt: hhmm() };
+    // `load` is the simulated change in weight the live scale moves to at weigh-out: up for a loading, down for an unloading.
+    const row = empty
+      ? { ...base, entry: 'empty', tare: s.scale, load: 15000 + Math.round(Math.random() * 5000) }
+      : { ...base, entry: 'loaded', gross: s.scale, load: -Math.max(0, s.scale - (4000 + Math.round(Math.random() * 1000))) };
     set((st) => ({ seq: st.seq + 1, db: { ...st.db, onsite: st.db.onsite.concat([row]) }, wb: { ...st.wb, vehicle: '', err: '' } }));
-    toast(ticket + ' opened — tare ' + N(row.tare) + ' kg captured for ' + row.vehicle + '.');
+    toast(ticket + ' opened — ' + kind + ' ' + N(s.scale) + ' kg captured for ' + row.vehicle + '.');
     return undefined;
   };
 
   const weighOut = (id) => {
     const v = s.db.onsite.find((x) => x.id === id);
-    set((st) => ({ wb: { ...st.wb, outId: id }, target: v.tare + v.load }));
+    set((st) => ({ wb: { ...st.wb, outId: id }, target: firstWeight(v) + v.load }));
+  };
+  // Hand-corrected empty (tare) and loaded (gross) weights for a vehicle still on site; null clears a side.
+  const updateOnsiteWeights = (id, weights) => {
+    const v = s.db.onsite.find((x) => x.id === id);
+    if (!v) return;
+    set((st) => ({ db: { ...st.db, onsite: st.db.onsite.map((x) => (x.id === id ? { ...x, ...weights } : x)) } }));
+    toast(v.ticket + ' weights updated for ' + v.vehicle + '.');
   };
   const cancelOut = () => set((st) => ({ wb: { ...st.wb, outId: null }, target: IDLE_SCALE_KG }));
 
   const ticketFromOnsite = (v, patch) => ({
     id: 'O' + Date.now(), ticket: v.ticket, date: isoDate(), time: hhmm(), custId: v.custId, matId: v.matId, matName: '', vehicle: v.vehicle, dir: 'OUT',
-    tare: v.tare, manualRate: '', method: 'Credit', roundOff: 0, payRemarks: '', remarks: '', by: 'Murugan R', ...patch,
+    manualRate: '', method: 'Credit', roundOff: 0, payRemarks: '', remarks: '', by: 'Murugan R', ...patch,
   });
 
   // Weigh-out takes the live reading as gross, then asks how the load was paid before the ticket is saved.
   const confirmOut = () => {
     const v = s.db.onsite.find((x) => x.id === s.wb.outId);
     if (!v) return;
-    const o = ticketFromOnsite(v, { gross: s.scale, status: 'Completed', reason: '' });
+    if (v.tare == null || v.gross == null) { toast('Capture both the empty and the loaded weight before completing ' + v.ticket + '.'); return; }
+    const o = ticketFromOnsite(v, { tare: v.tare, gross: v.gross, status: 'Completed', reason: '' });
     openPay({
       source: 'weighbridge', ticket: o, onsiteId: v.id, bill: d.billTotal(o), walkIn: false,
       title: v.ticket + ' — ' + d.cust(v.custId).name, initial: defaultPay(d.billTotal(o), { walkIn: false, cashSerial: false }),
@@ -400,7 +373,8 @@ export default function App() {
   const doVoid = () => {
     const v = s.db.onsite.find((x) => x.id === s.modal.id);
     if (!v) return;
-    const o = ticketFromOnsite(v, { gross: v.tare, status: 'Void', reason: 'Voided at weigh-out' });
+    // Same weight on both sides, so a voided load nets to zero.
+    const o = ticketFromOnsite(v, { tare: firstWeight(v), gross: firstWeight(v), status: 'Void', reason: 'Voided at weigh-out' });
     set((st) => ({
       db: { ...st.db, orders: [o].concat(st.db.orders), onsite: st.db.onsite.filter((x) => x.id !== v.id) },
       wb: { ...st.wb, outId: null }, modal: null, target: IDLE_SCALE_KG,
@@ -459,10 +433,6 @@ export default function App() {
     const n = normalName(name);
     return n ? s.db.customers.find((c) => normalName(c.name) === n) : null;
   };
-  const matchSupplier = (name) => {
-    const n = normalName(name);
-    return n ? s.db.suppliers.find((p) => normalName(p.name) === n) : null;
-  };
   const alreadyIn = (row) => s.db.orders.some((o) => (o.serial || o.ticket) === row.serial && o.date === row.date)
     || s.db.purchases.some((p) => p.serial === row.serial && p.date === row.date);
 
@@ -470,10 +440,7 @@ export default function App() {
     const m = matchMaterial(row.material);
     const key = row.date + '|' + row.serial;
     const cashSerial = /^CA/i.test(row.serial);
-    if (m.kind === 'soling') {
-      const p = matchSupplier(row.name);
-      return { ...row, key, batchId, kind: 'soling', matId: m.matId, supplierId: p ? p.id : '', dup: alreadyIn(row) };
-    }
+    if (m.kind === 'soling') return { ...row, key, batchId, kind: 'soling', matId: m.matId, dup: alreadyIn(row) };
     const party = matchParty(row.name);
     const staged = {
       ...row, key, batchId, kind: 'sale', matId: m.matId, matName: m.matName,
@@ -519,25 +486,11 @@ export default function App() {
           staging: st.db.staging.map((r) => (r.key === key ? { ...next, pay: defaultPay(rowBill(d, next).bill, { walkIn: false, cashSerial }) } : r)),
         },
       }));
-      toast(cust.name + (exists ? ' is already a credit party — linked.' : ' added as a credit party. Add owner, contact and address on Credit Parties.'));
+      toast(cust.name + (exists ? ' is already a customer — linked.' : ' added as a customer. Add owner, contact and address on Customers.'));
       return;
     }
     const next = v === '__walkin' ? { ...row, custId: '', walkIn: row.name } : { ...row, custId: v, walkIn: '' };
     patchStaged(key, { custId: next.custId, walkIn: next.walkIn, pay: defaultPay(rowBill(d, next).bill, { walkIn: !next.custId, cashSerial }) });
-  };
-
-  const chooseSupplierForRow = (key, v) => {
-    const row = s.db.staging.find((r) => r.key === key);
-    if (v === '__new') {
-      const exists = matchSupplier(row.name);
-      const sup = exists || { id: 'N' + Date.now(), code: nextCode(s.db.suppliers, 'SP-', 2), name: row.name.trim(), owner: '', address: '', contact: '', upi: '', linkedCustId: '', status: 'Active', remarks: 'Added from register import' };
-      set((st) => ({
-        db: { ...st.db, suppliers: exists ? st.db.suppliers : [sup].concat(st.db.suppliers), staging: st.db.staging.map((r) => (r.key === key ? { ...r, supplierId: sup.id } : r)) },
-      }));
-      toast(sup.name + (exists ? ' is already a soling supplier — linked.' : ' added as a soling supplier.'));
-      return;
-    }
-    patchStaged(key, { supplierId: v });
   };
 
   const editStagedPay = (key) => {
@@ -586,13 +539,13 @@ export default function App() {
     const ready = s.db.staging.filter((r) => r.kind === 'soling' && solingStatus(r).ready);
     if (!ready.length) return;
     const recs = ready.map((r, i) => ({
-      id: 'U' + Date.now() + '-' + i, serial: r.serial, date: r.date, time: r.time, supplierId: r.supplierId, regName: r.name,
+      id: 'U' + Date.now() + '-' + i, serial: r.serial, date: r.date, time: r.time, supplierName: String(r.name || '').trim(), regName: r.name,
       // Soling trucks come in loaded: the register's Gross column is the empty truck, its Net column the loaded weight.
       vehicle: r.vehicle, tare: r.gross, gross: r.net, manualRate: r.manualRate || '', extra: r.extra || '', batchId: r.batchId, remarks: r.remarks || '', by: actor.name,
     }));
     const keys = new Set(ready.map((r) => r.key));
     set((st) => ({ db: { ...st.db, purchases: recs.concat(st.db.purchases), staging: st.db.staging.filter((r) => !keys.has(r.key)) } }));
-    toast(ready.length + ' soling load(s) saved for the soling ledger.');
+    toast(ready.length + ' soling load(s) saved.');
   };
 
   const removeStaged = (key) => {
@@ -600,7 +553,7 @@ export default function App() {
     askDelete({ ...row, id: row.key }, 'staging');
   };
   const clearStaged = () => set({
-    modal: { kind: 'clearStaging', title: 'Void all pending rows?', kicker: 'Register import', confirmLabel: 'Void all', message: 'Rows not yet posted go to Voided entries, where they can be restored.' },
+    modal: { kind: 'clearStaging', title: 'Remove all pending rows?', kicker: 'Register import', confirmLabel: 'Remove all', message: 'Rows not yet posted are deleted for good and cannot be restored.' },
   });
 
   // ---- list modules ----
@@ -609,8 +562,6 @@ export default function App() {
   const party = s.mod === 'party' ? s.db.customers.find((c) => c.id === s.partyId) : null;
 
   const openParty = (id) => set({ mod: 'party', partyId: id, partyTab: 'Loads taken', modal: null });
-  const sup = s.mod === 'supplier' ? (s.db.suppliers || []).find((p) => p.id === s.supplierId) : null;
-  const openSupplier = (id) => set({ mod: 'supplier', supplierId: id, supplierTab: 'Loads supplied', modal: null });
   // ---- fuel bunks and spares companies ----
   const cr = s.mod === 'creditor' ? (s.db.creditors || []).find((c) => c.id === s.creditorId) : null;
   const openCreditor = (id) => set({ mod: 'creditor', creditorId: id, creditorTab: '', modal: null });
@@ -646,7 +597,6 @@ export default function App() {
     toast(M(amt) + ' paid to ' + c.name + '. ' + (left < -0.5 ? M(-left) + ' paid ahead.' : 'Still owed ' + M(Math.max(0, left)) + '.'));
   };
 
-  const supplierOfParty = (custId) => (s.db.suppliers || []).find((p) => p.linkedCustId === custId);
 
   // Manual load entered from a credit party's account; saving opens the payment dialog.
   const openNewLoad = (custId) => {
@@ -738,38 +688,6 @@ export default function App() {
     set({ modal: { kind: 'form', cfgMod: 'advances', title: 'Give advance' + (empId ? ' — ' + P.emp(empId).name : ''), kicker: 'Worker advance', confirmLabel: 'Save advance' }, form: f, errors: {} });
   };
 
-  const salaryRecord = (line, recover, extra) => {
-    const v = P.settle(line, recover);
-    return {
-      id: 'W' + Date.now() + '-' + line.emp.id, weekEnd: line.weekEnd, empId: line.emp.id, worked: line.worked, earned: line.earned,
-      cutWeek: v.cutWeek, cutOld: v.cutOld, net: v.net, by: actor.name, remarks: '', ...extra,
-    };
-  };
-  const payDate = (weekEnd) => (isoDate() < weekEnd ? isoDate() : weekEnd);
-  const openSalaryPay = (line, recover) => set({
-    modal: { kind: 'salary', line, title: 'Pay ' + line.emp.name, kicker: 'Salary · week ending ' + line.weekEnd, confirmLabel: 'Save payment' },
-    form: { recover: recover || '', mode: 'Cash', date: payDate(line.weekEnd), time: hhmm(), remarks: '' }, errors: {},
-  });
-  const saveSalary = () => {
-    const { line } = s.modal;
-    const f = s.form;
-    if (String(f.recover ?? '').trim() && !(+f.recover >= 0)) { set({ errors: { recover: 'Enter an amount, or leave it blank.' } }); return; }
-    if (!f.date) { set({ errors: { date: 'Required.' } }); return; }
-    const rec = salaryRecord(line, f.recover, { date: f.date, time: f.time || hhmm(), mode: f.mode, remarks: String(f.remarks || '').trim() });
-    set((st) => ({ db: { ...st.db, payroll: (st.db.payroll || []).concat([rec]) }, modal: null }));
-    toast(M(rec.net) + ' paid to ' + line.emp.name + (rec.cutWeek + rec.cutOld ? ' after ' + M(rec.cutWeek + rec.cutOld) + ' advance taken back.' : '.'));
-  };
-  const payAllSalaries = (items) => {
-    const recs = items.map(({ line, recover }) => salaryRecord(line, recover, { date: payDate(line.weekEnd), time: hhmm(), mode: 'Cash' }));
-    set((st) => ({ db: { ...st.db, payroll: (st.db.payroll || []).concat(recs) } }));
-    toast(recs.length + ' workers paid ' + M(recs.reduce((t, r) => t + r.net, 0)) + ' in cash.');
-  };
-  const salaryStatement = async (weekEnd, recovers) => {
-    const { buildSalaryStatement, reportPdf } = await import('./lib/exports');
-    await reportPdf(buildSalaryStatement(P, weekEnd, weekDays(weekEnd), recovers));
-    toast('Salary statement downloaded.');
-  };
-
   // ---- electricity: one reading per day, one month-end entry per month ----
   const saveEbReading = (rec) => {
     set((st) => {
@@ -798,38 +716,7 @@ export default function App() {
   };
   const openPageReport = (list, range) => openReport('', '', range, { list });
 
-  // ---- start fresh: remove sample data before real use ----
-  const openStartFresh = () => set({
-    modal: {
-      kind: 'startFresh', title: 'Start fresh for real use?', kicker: 'Remove sample data', confirmLabel: 'Remove sample data',
-      message: 'Removes every load, payment, imported row, soling load, soling payment and pass, soling rate, worker, attendance, advance, salary, fuel bunk, spares company, expense, EB entry and voided entry. Keeps credit parties, soling suppliers, materials and party / standard rates. Download a full backup first if you are unsure. This cannot be undone.',
-    },
-    form: { confirm: '' }, errors: {},
-  });
-  const startFresh = () => {
-    if (!me || me.role !== 'owner') { toast('Only the owner can start fresh.'); return; }
-    if (String(s.form.confirm || '').trim().toUpperCase() !== 'START') { set({ errors: { confirm: 'Type START to confirm.' } }); return; }
-    set((st) => ({
-      db: {
-        ...st.db,
-        orders: [], payments: [], staging: [], imports: [], purchases: [], supPayments: [], solPasses: [], solRates: [], voided: [], onsite: [],
-        employees: [], attendance: [], advances: [], payroll: [], expenses: [], creditors: [], crBills: [], crPayments: [], ebReadings: [], ebBills: [], audit: [], approvals: [],
-        settings: { cashStart: 0, bankStart: 0, startDate: '' },
-        customers: st.db.customers.map((c) => ({ ...c, received: 0, last: '—' })),
-      },
-      modal: null,
-    }));
-    toast('Sample data removed. Add your workers, bunk, spares companies and soling rates, then start entering real days.');
-  };
-
   // ---- day book ----
-  const openExpense = () => {
-    const c = cfgOf('expenses');
-    const f = {};
-    c.fields.forEach((x) => { f[x.k] = x.type === 'select' ? (x.options[0] ? x.options[0].v : '') : x.type === 'date' ? isoDate() : x.type === 'time' ? hhmm() : ''; });
-    f.mode = 'Cash';
-    set({ modal: { kind: 'form', cfgMod: 'expenses', title: 'New expense / income', kicker: 'Day book', confirmLabel: 'Save' }, form: f, errors: {} });
-  };
   const openOpening = () => {
     const st = s.db.settings || {};
     set({
@@ -847,105 +734,18 @@ export default function App() {
     toast('Opening balances saved from ' + f.startDate + '.');
   };
 
-  // ---- soling suppliers ----
-  const openNewSoling = (supplierId) => {
-    const c = cfgOf('purchases');
-    const f = {};
-    c.fields.forEach((x) => { f[x.k] = x.type === 'date' ? isoDate() : x.type === 'time' ? hhmm() : ''; });
-    f.supplierId = supplierId || ((s.db.suppliers || [])[0] || {}).id || '';
-    set({ modal: { kind: 'form', cfgMod: 'purchases', title: c.add, kicker: 'Soling load', confirmLabel: 'Save load' }, form: f, errors: {} });
-  };
-
-  const openSupPay = (p) => set({
-    modal: { kind: 'supPay', id: p.id, title: 'Pay ' + p.name, kicker: 'Payment to soling supplier', confirmLabel: 'Save payment' },
-    form: { amount: '', method: 'Cash', date: isoDate(), time: hhmm(), ref: '', remarks: '' }, errors: {},
-  });
-
-  const postSupPay = () => {
-    const f = s.form;
-    const p = d.supplier(s.modal.id);
-    const amt = round2(f.amount);
-    const errs = {};
-    if (!(amt > 0)) errs.amount = 'Enter an amount greater than zero.';
-    if (!f.date) errs.date = 'Required.';
-    if (Object.keys(errs).length) { set({ errors: errs }); return; }
-    const rec = {
-      id: 'Z' + Date.now(), date: f.date, time: f.time || hhmm(), supplierId: p.id, method: f.method, amount: amt,
-      ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: actor.name,
-    };
-    set((st) => ({ db: { ...st.db, supPayments: (st.db.supPayments || []).concat([rec]) }, modal: null }));
-    const left = d.owed(p) - amt;
-    toast(M(amt) + ' paid to ' + p.name + ' by ' + METHOD_LABEL[f.method] + '. ' + (left < -0.5 ? M(-left) + ' paid ahead.' : 'Still owed ' + M(Math.max(0, left)) + '.'));
-  };
-
-  // Pass amount for a soling supplier: an amount, optionally tied to the loads it covers; added to what we owe.
-  const openPass = (supplierId, loadIds = [], existing = null) => set({
-    modal: {
-      kind: 'solPass', supplierId, id: existing ? existing.id : '', confirmLabel: existing ? 'Save changes' : 'Add to what we owe',
-      title: (existing ? 'Edit pass amount — ' : 'Add pass amount — ') + d.supplier(supplierId).name, kicker: 'Soling pass',
-    },
-    form: existing
-      ? { amount: existing.amount, date: existing.date, time: existing.time || '', loadIds: existing.loadIds || [], remarks: existing.remarks || '' }
-      : { amount: '', date: isoDate(), time: hhmm(), loadIds, remarks: '' },
-    errors: {},
-  });
-  const savePass = () => {
-    const m = s.modal;
-    const f = s.form;
-    const amt = round2(f.amount);
-    const errs = {};
-    if (!(amt > 0)) errs.amount = 'Enter the pass amount.';
-    if (!f.date) errs.date = 'Required.';
-    if (Object.keys(errs).length) { set({ errors: errs }); return; }
-    const rec = { supplierId: m.supplierId, amount: amt, date: f.date, time: f.time || hhmm(), loadIds: f.loadIds || [], remarks: String(f.remarks || '').trim() };
-    set((st) => {
-      const list = st.db.solPasses || [];
-      const next = m.id ? list.map((x) => (x.id === m.id ? { ...x, ...rec } : x)) : list.concat([{ id: 'PS' + Date.now(), ...rec, by: actor.name }]);
-      return { db: { ...st.db, solPasses: next }, modal: null };
-    });
-    toast('Pass amount ' + M(amt) + (rec.loadIds.length ? ' for ' + rec.loadIds.length + ' load(s)' : '') + ' ' + (m.id ? 'updated' : 'added to what we owe ' + d.supplier(m.supplierId).name) + '.');
-  };
-
-  const openSolRate = (supplierId) => set({
-    modal: { kind: 'solRate', id: supplierId, title: 'New soling rate — ' + d.supplier(supplierId).name, kicker: 'Rate per ton', confirmLabel: 'Save rate' },
-    form: { rate: '', from: isoDate(), to: '', remarks: '' }, errors: {},
-  });
-
-  // Same period rules as party rates: an open-ended earlier period is closed the day before; other overlaps are refused.
-  const saveSolRate = () => {
-    const id = s.modal.id;
-    const f = s.form;
-    const own = (s.db.solRates || []).filter((r) => r.supplierId === id).map((r) => ({ ...r, custId: '', matId: 'SOL' }));
-    const rec = { custId: '', matId: 'SOL', rate: +f.rate, from: f.from, to: f.to || '' };
-    const plan = planRate(own, rec);
-    if (plan.errors) { set({ errors: plan.errors }); return; }
-    const card = { id: 'SR' + Date.now(), supplierId: id, rate: rec.rate, from: rec.from, to: rec.to, remarks: String(f.remarks || '').trim(), by: actor.name };
-    set((st) => ({
-      db: {
-        ...st.db,
-        solRates: (st.db.solRates || []).map((r) => {
-          const c = plan.closes.find((x) => x.id === r.id);
-          return c ? { ...r, to: c.to } : r;
-        }).concat([card]),
-      },
-      modal: null,
-    }));
-    const closed = plan.closes.map((c) => ' The earlier ' + M(c.was.rate) + '/t period now ends ' + c.to + '.').join('');
-    toast(M(card.rate) + '/t from ' + card.from + ' saved for ' + d.supplier(id).name + '.' + closed);
-  };
-
-  // Receipt on a party's account: how it was paid and who received the money (company, a soling supplier, or someone else).
+  // Receipt on a party's account: how it was paid and who received the money (company, a bunk / spares company, or someone else).
   const openReceipt = (c) => set({
     modal: { kind: 'receipt', id: c.id, title: 'Record payment — ' + c.name, kicker: 'Payment received', confirmLabel: 'Save payment' },
     form: { amount: '', method: 'Cash', to: 'company', toName: '', date: isoDate(), time: hhmm(), ref: '', remarks: '' }, errors: {},
   });
 
-  // ---- voided entries: nothing is deleted outright ----
+  // ---- deleting: a record goes together with the records that depend on it ----
   const KIND_NAME = {
-    orders: 'Load', payments: 'Payment', customers: 'Credit party', suppliers: 'Soling supplier', materials: 'Material', rates: 'Rate period',
-    staging: 'Import row', purchases: 'Soling load', supPayments: 'Supplier payment', solRates: 'Soling rate', expenses: 'Expense', employees: 'Employee', attendance: 'Attendance entry', advances: 'Advance', payroll: 'Payroll line',
+    orders: 'Load', payments: 'Payment', customers: 'Customer', materials: 'Material', rates: 'Rate period',
+    staging: 'Import row', purchases: 'Soling load', expenses: 'Expense', employees: 'Employee', attendance: 'Attendance entry', advances: 'Advance', payroll: 'Payroll line',
   };
-  const voidEntryFor = (key, row) => {
+  const deletionFor = (key, row) => {
     const D = s.db;
     if (key === 'orders') {
       return { kind: 'Load', label: row.ticket + ' · ' + d.partyLabel(row) + ' · ' + d.matLabel(row) + ' · ' + T(d.net(row)) + ' t', amount: d.billTotal(row), records: { orders: [row], payments: d.paymentsFor(row.id) } };
@@ -953,26 +753,16 @@ export default function App() {
     if (key === 'customers') {
       const ids = new Set(D.orders.filter((o) => o.custId === row.id).map((o) => o.id));
       return {
-        kind: 'Credit party', label: row.name + ' (' + row.code + ') with ' + ids.size + ' load(s)', amount: d.outstanding(row),
+        kind: 'Customer', label: row.name + ' (' + row.code + ') with ' + ids.size + ' load(s)', amount: d.outstanding(row),
         records: { customers: [row], orders: D.orders.filter((o) => ids.has(o.id)), payments: D.payments.filter((p) => ids.has(p.ticketId) || (!p.ticketId && p.custId === row.id)), rates: D.rates.filter((r) => r.custId === row.id) },
       };
     }
     if (key === 'materials') return { kind: 'Material', label: row.name, records: { materials: [row], rates: D.rates.filter((r) => r.matId === row.id) } };
     if (key === 'payments') return { kind: row.ticketId ? 'Payment' : 'Receipt', label: d.cust(row.custId).name + ' · ' + METHOD_LABEL[row.method] + ' · ' + row.date, amount: row.amount, records: { payments: [row] } };
     if (key === 'rates') return { kind: 'Rate period', label: rateTarget(row.custId) + ' · ' + d.mat(row.matId).name + ' · ' + M(row.rate) + '/t · ' + periodLabel(row), records: { rates: [row] } };
-    if (key === 'purchases') return { kind: 'Soling load', label: (row.serial || 'Load') + ' · ' + d.supplier(row.supplierId).name + ' · ' + row.vehicle + ' · ' + T(d.net(row)) + ' t', amount: d.solValue(row), records: { purchases: [row] } };
-    if (key === 'supPayments') return { kind: 'Supplier payment', label: d.supplier(row.supplierId).name + ' · ' + METHOD_LABEL[row.method] + ' · ' + row.date, amount: row.amount, records: { supPayments: [row] } };
-    if (key === 'solRates') return { kind: 'Soling rate', label: d.supplier(row.supplierId).name + ' · ' + M(row.rate) + '/t · ' + periodLabel(row), records: { solRates: [row] } };
-    if (key === 'suppliers') {
-      const loads = (D.purchases || []).filter((u) => u.supplierId === row.id);
-      return {
-        kind: 'Soling supplier', label: row.name + ' (' + row.code + ') with ' + loads.length + ' load(s)', amount: d.owed(row),
-        records: { suppliers: [row], purchases: loads, supPayments: (D.supPayments || []).filter((p) => p.supplierId === row.id), solRates: (D.solRates || []).filter((r) => r.supplierId === row.id) },
-      };
-    }
+    if (key === 'purchases') return { kind: 'Soling load', label: (row.serial || 'Load') + ' · ' + (row.supplierName || 'Supplier not named') + ' · ' + row.vehicle + ' · ' + T(d.net(row)) + ' t', amount: d.solValue(row), records: { purchases: [row] } };
     if (key === 'ebReadings') return { kind: 'EB reading', label: row.date + ' · ' + row.units + ' kWh' + (row.pf ? ' · PF ' + row.pf : ''), amount: null, records: { ebReadings: [row] } };
     if (key === 'ebBills') return { kind: 'Electricity bill', label: row.month + ' · govt ' + M(row.govt) + ' · private ' + M(row.private) + (row.tharAmount ? ' · Thar ' + M(row.tharAmount) : ''), amount: (+row.govt || 0) + (+row.private || 0), records: { ebBills: [row] } };
-    if (key === 'solPasses') return { kind: 'Pass amount', label: d.supplier(row.supplierId).name + ' · ' + row.date + ((row.loadIds || []).length ? ' · ' + row.loadIds.length + ' load(s)' : ''), amount: +row.amount || 0, records: { solPasses: [row] } };
     if (key === 'creditors') {
       return {
         kind: row.kind === 'bunk' ? 'Fuel bunk' : 'Spares company', label: row.name + ' with ' + (D.crBills || []).filter((b) => b.creditorId === row.id).length + ' bill(s)', amount: d.crOwed(row),
@@ -989,55 +779,32 @@ export default function App() {
   };
 
   const askDelete = (row, key = cfg && cfg.key) => {
-    const entry = voidEntryFor(key, row);
+    const entry = deletionFor(key, row);
     set({
-      modal: { kind: 'delete', key, row, title: 'Delete ' + entry.kind.toLowerCase() + '?', kicker: entry.label, confirmLabel: 'Move to voided entries' },
-      form: { reason: '' },
+      modal: { kind: 'delete', key, row, title: 'Delete ' + entry.kind.toLowerCase() + '?', kicker: entry.label, confirmLabel: 'Delete permanently', message: 'This is deleted for good, with anything recorded against it, and cannot be restored.' },
+      form: {},
       errors: {},
     });
   };
 
   const doDelete = () => {
     const { key, row } = s.modal;
-    const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: actor.name, reason: String(s.form.reason || '').trim(), ...voidEntryFor(key, row) };
+    const entry = deletionFor(key, row);
     const drop = (list, items, idKey) => list.filter((x) => !items.some((y) => y[idKey] === x[idKey]));
     set((st) => {
-      const db = { ...st.db, voided: [entry].concat(st.db.voided || []) };
+      const db = { ...st.db };
       Object.entries(entry.records).forEach(([k, items]) => { db[k] = drop(st.db[k] || [], items, k === 'staging' ? 'key' : 'id'); });
-      if (key === 'customers') db.suppliers = st.db.suppliers.map((p) => (p.linkedCustId === row.id ? { ...p, linkedCustId: '' } : p));
-      return { db, modal: null, ...(key === 'customers' && st.mod === 'party' ? { mod: 'customers' } : key === 'suppliers' && st.mod === 'supplier' ? { mod: 'suppliers' } : key === 'creditors' && st.mod === 'creditor' ? { mod: row.kind === 'bunk' ? 'bunks' : 'vendors' } : {}) };
+      return { db, modal: null, ...(key === 'customers' && st.mod === 'party' ? { mod: 'customers' } : key === 'creditors' && st.mod === 'creditor' ? { mod: row.kind === 'bunk' ? 'bunks' : 'vendors' } : {}) };
     });
-    toast(entry.kind + ' moved to Voided entries.');
-  };
-
-  const askPurge = (entry) => set({
-    modal: { kind: 'purgeVoided', entry, title: 'Delete permanently?', kicker: entry.kind, confirmLabel: 'Delete permanently', message: entry.label + ' will be deleted for good and cannot be restored.' },
-  });
-  const purgeVoided = () => {
-    const { entry } = s.modal;
-    const ok = set((st) => ({ db: { ...st.db, voided: (st.db.voided || []).filter((e) => e.id !== entry.id) }, modal: null }));
-    if (ok) toast('Deleted permanently.');
-  };
-
-  const restoreEntry = (entry) => {
-    set((st) => {
-      const db = { ...st.db, voided: (st.db.voided || []).filter((e) => e.id !== entry.id) };
-      Object.entries(entry.records).forEach(([k, items]) => {
-        const idKey = k === 'staging' ? 'key' : 'id';
-        const have = new Set((st.db[k] || []).map((x) => x[idKey]));
-        db[k] = items.filter((x) => !have.has(x[idKey])).concat(st.db[k] || []);
-      });
-      return { db };
-    });
-    toast(entry.kind + ' restored.');
+    toast(entry.kind + ' deleted.');
   };
 
   // ---- PDF reports ----
-  // who: { supplierId } for one soling supplier, { suppliers: true } for all of them; otherwise a party (custId) or all parties.
+  // who: { creditorId } for one bunk / spares account; otherwise a customer (custId) or all customers.
   const openReport = (custId, type, range = {}, who = {}) => set({
     modal: {
-      kind: 'report', custId, supplierId: who.supplierId || '', allSuppliers: !!who.suppliers, creditorId: who.creditorId || '', listReport: who.list || '', kicker: 'Report', confirmLabel: 'Download',
-      title: who.creditorId ? 'Generate report — ' + d.creditor(who.creditorId).name : who.list ? ({ fuel: 'Fuel bunks report', spares: 'Spares & purchases report', eb: 'Electricity (EB) report', attendance: 'Attendance & wages report', daily: 'Day report' }[who.list] || 'Report') : custId ? 'Generate report — ' + d.cust(custId).name : who.supplierId ? 'Generate report — ' + d.supplier(who.supplierId).name : who.suppliers ? 'All soling suppliers report' : 'All credit parties report',
+      kind: 'report', custId, creditorId: who.creditorId || '', listReport: who.list || '', kicker: 'Report', confirmLabel: 'Download',
+      title: who.creditorId ? 'Generate report — ' + d.creditor(who.creditorId).name : who.list ? ({ fuel: 'Fuel bunks report', spares: 'Spares & purchases report', eb: 'Electricity (EB) report', attendance: 'Attendance & wages report', daily: 'Day report' }[who.list] || 'Report') : custId ? 'Generate report — ' + d.cust(custId).name : 'All customers report',
     },
     form: { type: type || 'statement', copy: 'party', format: 'pdf', fromDate: range.fromDate || '', fromTime: range.fromTime || '', toDate: range.toDate || '', toTime: range.toTime || '' },
     errors: {},
@@ -1060,8 +827,6 @@ export default function App() {
       return;
     }
     if (m.custId) await R.partyReport({ d, party: d.cust(m.custId), type: f.type, from, to, copy: f.copy });
-    else if (m.supplierId) await R.supplierReport({ d, sup: d.supplier(m.supplierId), type: f.type, from, to });
-    else if (m.allSuppliers) await R.allSuppliersReport({ d, from, to });
     else await R.allPartiesReport({ d, from, to });
     set({ modal: null });
     toast('Report downloaded.');
@@ -1069,7 +834,6 @@ export default function App() {
 
   const openAdd = () => {
     if (!cfg) return;
-    if (s.mod === 'payments') { openReceipt(s.db.customers[0]); return; }
     const f = {};
     cfg.fields.forEach((x) => {
       f[x.k] = x.type === 'select' ? (x.options[0] ? x.options[0].v : '') : x.type === 'date' ? isoDate() : x.type === 'time' ? hhmm() : '';
@@ -1120,8 +884,8 @@ export default function App() {
   const askEndRate = (card, coll = 'rates') => set({
     modal: {
       kind: 'endRate', id: card.id, coll, confirmLabel: 'End rate',
-      title: 'End ' + (coll === 'solRates' ? 'soling' : d.mat(card.matId).name) + ' at ' + M(card.rate) + '/t?',
-      kicker: coll === 'solRates' ? d.supplier(card.supplierId).name : rateTarget(card.custId),
+      title: 'End ' + d.mat(card.matId).name + ' at ' + M(card.rate) + '/t?',
+      kicker: rateTarget(card.custId),
     },
     form: { to: isoDate() < card.from ? card.from : isoDate() },
     errors: {},
@@ -1134,16 +898,14 @@ export default function App() {
     if (!to) { set({ errors: { to: 'Required.' } }); return; }
     if (to < card.from) { set({ errors: { to: 'The rate starts on ' + card.from + '; pick that day or later.' } }); return; }
     set((st) => ({ db: { ...st.db, [coll]: st.db[coll].map((r) => (r.id === card.id ? { ...r, to } : r)) }, modal: null }));
-    toast((coll === 'solRates' ? d.supplier(card.supplierId).name : d.mat(card.matId).name) + ' at ' + M(card.rate) + '/t now ends ' + to + '.');
+    toast(d.mat(card.matId).name + ' at ' + M(card.rate) + '/t now ends ' + to + '.');
   };
 
   const onRowAction = (kind, row) => {
     if (kind === 'party') openParty(row.id);
     else if (kind === 'stdrates') set({ mod: 'stdrates', modal: null });
     else if (kind === 'receipt') openReceipt(row);
-    else if (kind === 'reinstate') reinstate(row);
     else if (kind === 'pay') openTicketPay(row);
-    else if (kind === 'supplier') openSupplier(row.supplierId);
   };
 
   const postReceipt = () => {
@@ -1158,16 +920,15 @@ export default function App() {
     if (f.to === 'other' && !String(f.toName || '').trim()) errs.toName = 'Type who received it.';
     if (!f.date) errs.date = 'Required.';
     if (Object.keys(errs).length) { set({ errors: errs }); return; }
-    const toSupplier = f.to.startsWith('S:');
     const toCreditor = f.to.startsWith('C:');
     const rec = {
       id: 'YR' + Date.now(), date: f.date, time: f.time || hhmm(), ticketId: '', custId: c.id, walkIn: '',
-      method: f.method, amount: amt, toType: toSupplier ? 'supplier' : toCreditor ? 'creditor' : f.to,
-      supplierId: toSupplier ? f.to.slice(2) : '', creditorId: toCreditor ? f.to.slice(2) : '',
+      method: f.method, amount: amt, toType: toCreditor ? 'creditor' : f.to,
+      creditorId: toCreditor ? f.to.slice(2) : '',
       toName: f.to === 'other' ? String(f.toName).trim() : '', ref: String(f.ref || '').trim(), remarks: String(f.remarks || '').trim(), by: actor.name,
     };
     set((st) => ({ db: { ...st.db, payments: st.db.payments.concat([rec]) }, modal: null }));
-    toast(M(amt) + ' received from ' + c.name + ' by ' + METHOD_LABEL[f.method] + ' → ' + paidToLabel(rec, (id) => d.supplier(id).name, d.creditorName) + '.');
+    toast(M(amt) + ' received from ' + c.name + ' by ' + METHOD_LABEL[f.method] + ' → ' + paidToLabel(rec, d.creditorName) + '.');
   };
 
   const save = () => {
@@ -1191,7 +952,6 @@ export default function App() {
       if (m.id) return { db: { ...st.db, [c.key]: list.map((r) => (r.id === m.id ? { ...r, ...rec } : r)) }, modal: null };
       if (newOrder) return { db: { ...st.db, orders: [newOrder].concat(list) }, modal: null, seq: st.seq + 1 };
       const extra = c.key === 'customers' ? { code: nextCode(list, 'CP-', 3), received: 0, last: '—' }
-        : c.key === 'suppliers' ? { code: nextCode(list, 'SP-', 2) }
           : c.key === 'creditors' ? { code: nextCode(list.filter((x) => x.kind === c.defaults.kind), c.defaults.kind === 'bunk' ? 'FB-' : 'SC-', 2), ...c.defaults }
           : c.key === 'crBills' ? { by: actor.name }
           : c.key === 'purchases' ? { batchId: '', by: actor.name }
@@ -1211,13 +971,8 @@ export default function App() {
       return;
     }
     if (c.key === 'crBills') { toast((m.cfgMod === 'fuelBills' ? 'Fuel entry ' : 'Purchase bill ') + (m.id ? 'updated' : 'saved') + ' for ' + d.creditor(rec.creditorId).name + '.'); return; }
-    if (c.key === 'purchases') { toast('Soling load ' + (m.id ? 'updated' : 'saved') + ' for ' + d.supplier(rec.supplierId).name + '.'); return; }
+    if (c.key === 'purchases') { toast('Soling load ' + (m.id ? 'updated' : 'saved') + (rec.supplierName ? ' for ' + rec.supplierName : '') + '.'); return; }
     toast(m.id ? (rec.name || rec.ticket || 'Record') + ' updated.' : (rec.name || (newOrder && newOrder.ticket) || 'Record') + ' created.');
-  };
-
-  const reinstate = (o) => {
-    set((st) => ({ db: { ...st.db, orders: st.db.orders.map((x) => (x.id === o.id ? { ...x, status: 'Completed', reason: '' } : x)) } }));
-    toast(o.ticket + ' reinstated as Completed.');
   };
 
   // ---- modal wiring ----
@@ -1232,7 +987,6 @@ export default function App() {
       return now.rate ? 'On ' + s.form.from + ' the rate is ' + M(now.rate) + '/t (' + now.src + ')' : 'No rate is set for ' + s.form.from + ' yet';
     };
     const toOptions = [{ v: 'company', l: 'Company account' }]
-      .concat(s.db.suppliers.filter((p) => p.status !== 'Inactive').map((p) => ({ v: 'S:' + p.id, l: p.name + ' (soling supplier)' })))
       .concat((s.db.creditors || []).filter((c) => c.status !== 'Inactive').map((c) => ({ v: 'C:' + c.id, l: c.name + (c.kind === 'bunk' ? ' (fuel bunk)' : ' (spares)') })))
       .concat([{ v: 'other', l: 'Someone else…' }]);
     const range = (from) => [
@@ -1261,33 +1015,14 @@ export default function App() {
           ] : []),
           { k: 'empty', label: m.sale ? 'Empty truck / tare (kg)' : 'Empty truck (kg) — register Gross', type: 'number' },
           { k: 'loaded', label: m.sale ? 'Loaded truck / gross (kg)' : 'Loaded truck (kg) — register Net', type: 'number' },
-          { k: 'rate', label: 'Rate (₹ per ton)', type: 'number', hint: m.sale ? 'Blank = the party rate card for this date' : "Blank = the supplier's rate for this date" },
-          ...(m.sale ? [] : [{ k: 'extra', label: 'Extra charges (₹)', type: 'number', hint: 'Rent, unloading — added to what we owe' }]),
+          { k: 'rate', label: 'Rate (₹ per ton)', type: 'number', hint: m.sale ? 'Blank = the party rate card for this date' : 'Rate per ton for this load — needed before it can be saved' },
+          ...(m.sale ? [] : [{ k: 'extra', label: 'Extra charges (₹)', type: 'number', hint: 'Rent, unloading — added to the load value' }]),
           { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
-        ]
-        : m.kind === 'salary' ? [
-          ...((m.line.oldDue > 0 || m.line.weekAdv > m.line.earned) ? [{ k: 'recover', label: 'Recover from older advance (₹)', type: 'number', hint: 'Older advance due ' + M(m.line.oldDue) + ' — leave blank to recover nothing', span: 'span 2' }] : []),
-          { k: 'mode', label: 'Paid by', type: 'select', options: RECEIPT_METHODS },
-          { k: 'date', label: 'Date', type: 'date' },
-          { k: 'time', label: 'Time', type: 'time' },
-          { k: 'remarks', label: 'Remarks', hint: 'Optional' },
         ]
         : m.kind === 'opening' ? [
           { k: 'startDate', label: 'Balances as at the start of', type: 'date', span: 'span 2' },
           { k: 'cashStart', label: 'Cash in hand (₹)', type: 'number' },
           { k: 'bankStart', label: 'Bank & UPI balance (₹)', type: 'number' },
-        ]
-        : m.kind === 'startFresh' ? [{ k: 'confirm', label: 'Type START to confirm', span: 'span 2', placeholder: 'START' }]
-        : m.kind === 'solPass' ? [
-          { k: 'amount', label: 'Pass amount (₹)', type: 'number' },
-          { k: 'date', label: 'Date', type: 'date' },
-          { k: 'time', label: 'Time', type: 'time' },
-          { k: 'remarks', label: 'Remarks', hint: 'Optional' },
-          {
-            k: 'loadIds', label: 'For which loads (optional — tick any, or skip)', type: 'checklist', span: 'span 2', empty: 'No soling loads for this supplier yet',
-            options: d.solLoadsOf(m.supplierId).slice().sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time))
-              .map((u) => ({ v: u.id, l: u.date + ' · ' + (u.serial || 'Load') + ' · ' + u.vehicle + ' · ' + T(d.net(u)) + ' t' + (d.passesForLoad(u.id).some((x) => x.id !== m.id) ? ' · already has a pass' : '') })),
-          },
         ]
         : m.kind === 'crPay' ? [
           { k: 'amount', label: 'Amount paid (₹)', type: 'number', hint: (() => { const o = d.crOwed(d.creditor(m.id)); return o < -0.5 ? 'Already paid ahead ' + M(-o) : 'We owe ' + M(Math.max(0, o)); })() },
@@ -1297,24 +1032,8 @@ export default function App() {
           { k: 'ref', label: 'Reference / UTR / cheque no.', span: 'span 2' },
           { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
         ]
-        : m.kind === 'supPay' ? [
-          { k: 'amount', label: 'Amount paid (₹)', type: 'number', hint: (() => { const o = d.owed(d.supplier(m.id)); return o < -0.5 ? 'Already paid ahead ' + M(-o) : 'We owe ' + M(Math.max(0, o)); })() },
-          { k: 'method', label: 'Method', type: 'select', options: RECEIPT_METHODS },
-          { k: 'date', label: 'Date', type: 'date' },
-          { k: 'time', label: 'Time', type: 'time' },
-          { k: 'ref', label: 'Reference / UTR / cheque no.', span: 'span 2' },
-          { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
-        ]
-        : m.kind === 'solRate' ? [
-          { k: 'rate', label: 'Rate (₹ per ton)', type: 'number', placeholder: '400', hint: (() => { const r = s.form.from ? d.solRateFor(m.id, s.form.from) : null; return r ? (r.rate ? 'On ' + s.form.from + ' the rate is ' + M(r.rate) + '/t' : 'No rate is set for ' + s.form.from + ' yet') : null; })() },
-          { k: 'from', label: 'Effective from', type: 'date' },
-          { k: 'to', label: 'Until (optional)', type: 'date', hint: 'Leave blank if this rate carries on' },
-          { k: 'remarks', label: 'Remarks', span: 'span 2', hint: 'Optional' },
-        ]
-        : m.kind === 'delete' ? [{ k: 'reason', label: 'Reason', span: 'span 2', hint: 'Optional — it moves to Voided entries and can be restored from there' }]
           : m.kind === 'report' ? [
             ...(m.creditorId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (bills + payments)' }, { v: 'bills', l: d.creditor(m.creditorId).kind === 'bunk' ? 'Fuel taken' : 'Purchase bills' }, { v: 'payments', l: 'Payments made' }] }] : []),
-            ...(m.supplierId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (loads + payments)' }, { v: 'loads', l: 'Soling loads supplied' }, { v: 'payments', l: 'Payments made' }] }] : []),
             ...(m.custId ? [{ k: 'type', label: 'Report', type: 'select', options: [{ v: 'statement', l: 'Account statement (loads + payments)' }, { v: 'loads', l: 'Loads taken' }, { v: 'payments', l: 'Payment history' }] }] : []),
             ...(m.custId ? [{ k: 'copy', label: 'Copy for', type: 'select', options: [{ v: 'party', l: 'The party (hides who received payments)' }, { v: 'company', l: 'Company (shows who received payments)' }] }] : []),
             ...(m.listReport === 'daily'
@@ -1338,16 +1057,6 @@ export default function App() {
       errors: s.errors,
       setField: (k, v) => set((st) => ({ form: { ...st.form, [k]: v }, errors: { ...st.errors, [k]: null } })),
       calcLines: formCfg && formCfg.calc ? formCfg.calc(s.form)
-        : m.kind === 'salary' ? (() => {
-          const v = P.settle(m.line, s.form.recover);
-          return [
-            { label: 'Days worked', value: String(m.line.worked) },
-            { label: 'Earned', value: M(m.line.earned) },
-            { label: "This week's advance", value: '− ' + M(v.cutWeek) },
-            { label: 'Older advance recovered', value: '− ' + M(v.cutOld) },
-            { label: 'Net pay', value: M(v.net) },
-          ];
-        })()
         : m.kind === 'stagedEdit' ? (() => {
           const net = Math.max(0, (+s.form.loaded || 0) - (+s.form.empty || 0)) / 1000;
           if (m.sale) {
@@ -1359,30 +1068,24 @@ export default function App() {
               { label: x.amount > 0 ? 'Bill (register amount)' : 'Bill (net tons × rate)', value: M(b.bill) },
             ];
           }
-          const u = { supplierId: (s.db.staging.find((r) => r.key === m.key) || {}).supplierId, date: s.form.date, manualRate: s.form.rate, tare: +s.form.empty || 0, gross: +s.form.loaded || 0, extra: s.form.extra };
+          const u = { date: s.form.date, manualRate: s.form.rate, tare: +s.form.empty || 0, gross: +s.form.loaded || 0, extra: s.form.extra };
           return [
             { label: 'Net boulders', value: T(net) + ' t' },
             { label: 'Rate (' + d.solRate(u).src + ')', value: M(d.solRate(u).rate) + ' / t' },
-            { label: 'We owe for this load', value: M(d.solValue(u)) },
+            { label: 'Load value', value: M(d.solValue(u)) },
           ];
         })() : null,
       onConfirm: {
-        delete: doDelete, void: doVoid, receipt: postReceipt, startFresh, purgeVoided, rollback: () => { const ids = s.modal.ids; set({ modal: null }); rollback(ids); }, solPass: savePass, crPay: postCrPay, salary: saveSalary, opening: saveOpening, stagedEdit: saveStagedEdit, supPay: postSupPay, solRate: saveSolRate, rate: saveRate, endRate, report: makeReport,
+        delete: doDelete, void: doVoid, receipt: postReceipt, rollback: () => { const ids = s.modal.ids; set({ modal: null }); rollback(ids); }, crPay: postCrPay, opening: saveOpening, stagedEdit: saveStagedEdit, rate: saveRate, endRate, report: makeReport,
         clearStaging: () => {
-          const rows = s.db.staging;
-          const entry = { id: 'X' + Date.now(), at: isoDate() + 'T' + hhmm(), by: actor.name, reason: 'Cleared all pending import rows', kind: 'Import rows', label: rows.length + ' pending row(s)', amount: null, records: { staging: rows } };
-          set((st) => ({ db: { ...st.db, staging: [], voided: [entry].concat(st.db.voided || []) }, modal: null }));
-          toast('Pending rows moved to Voided entries.');
+          set((st) => ({ db: { ...st.db, staging: [] }, modal: null }));
+          toast('Pending rows removed.');
         },
       }[m.kind] || save,
       onClose: closeModal,
     };
   }
 
-  if (!users.length) return <SetupOwner onCreate={createOwner} />;
-  if (!thisDevice || thisDevice.status !== 'approved') {
-    return <DeviceGate device={thisDevice} suggestedName={deviceGuess()} onRequest={requestDevice} onOwnerApprove={ownerApproveDevice} />;
-  }
   if (!me) {
     const done = s.db.orders.filter((o) => o.status !== 'Void' && o.date === TODAY);
     const last = done.slice().sort((a, b) => String(b.time || '').localeCompare(String(a.time || '')))[0];
@@ -1391,11 +1094,9 @@ export default function App() {
         users={users}
         requests={s.db.accessRequests || []}
         onSignIn={signIn}
+        onCreateOwner={createOwner}
         onRequestAccess={requestAccess}
         reason={lockReason}
-        deviceName={thisDevice.name}
-        scaleKg={s.scale}
-        scaleStable={Math.abs(s.scale - s.target) < 40}
         lastTicket={last ? { ticket: last.ticket, time: last.time, vehicle: last.vehicle, material: d.matLabel(last), gross: last.gross || 0, tare: last.tare || 0 } : null}
         stats={[
           { value: T(done.reduce((a, o) => a + d.net(o), 0)) + ' t', label: 'Weighed today' },
@@ -1408,11 +1109,11 @@ export default function App() {
   if (route === 'profile') return <Profile onSignOut={() => { window.location.hash = ''; signOut(); }} />;
 
   const meta = party
-    ? { ...MODS.party, title: party.name, sub: [party.owner && 'Owner ' + party.owner, party.contact, party.address].filter(Boolean).join(' · ') || 'Credit party — add owner, contact and address with Edit details.' }
-    : sup ? { ...MODS.supplier, title: sup.name, sub: [sup.owner && 'Owner ' + sup.owner, sup.contact, sup.upi && 'UPI ' + sup.upi].filter(Boolean).join(' · ') || 'Soling supplier — add owner, contact and UPI with Edit details.' }
-      : cr ? { ...MODS.creditor, title: cr.name, sub: [cr.kind === 'bunk' ? 'Fuel bunk' : 'Spares company', cr.owner, cr.contact, cr.upi && 'UPI ' + cr.upi].filter(Boolean).join(' · ') }
+    ? { ...MODS.party, title: party.name, sub: [party.owner && 'Owner ' + party.owner, party.contact, party.address].filter(Boolean).join(' · ') || 'Customer — add owner, contact and address with Edit details.' }
+    : cr ? { ...MODS.creditor, title: cr.name, sub: [cr.kind === 'bunk' ? 'Fuel bunk' : 'Spares company', cr.owner, cr.contact, cr.upi && 'UPI ' + cr.upi].filter(Boolean).join(' · ') }
         : MODS[s.mod] || MODS.dashboard;
-  const atStation = ['weighbridge', 'dashboard', 'import', 'voids', 'reports'].includes(s.mod);
+  const atStation = ['weighbridge', 'dashboard', 'import'].includes(s.mod);
+  const tabGroup = Object.keys(PAGE_GROUPS).find((g) => PAGE_GROUPS[g].includes(s.mod));
   const onRates = s.mod === 'party' || s.mod === 'stdrates';
   const filters = { q: s.q, status: s.status, from: s.from, to: s.to, sortK: s.sortK, sortDir: s.sortDir };
   const tonsToday = s.db.orders.filter((o) => o.status !== 'Void' && o.date === TODAY).reduce((a, o) => a + d.net(o), 0);
@@ -1430,8 +1131,8 @@ export default function App() {
             tons={T(tonsToday) + ' t'}
             now={s.now}
             onWeighbridge={() => go('weighbridge')}
-            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : sup ? 'Add soling load' : cr ? (cr.kind === 'bunk' ? 'Add fuel taken' : 'Add purchase bill') : s.mod === 'bunks' ? 'New fuel bunk' : s.mod === 'vendors' ? 'New spares company' : s.mod === 'daybook' ? 'Add expense' : s.mod === 'attendance' || s.mod === 'payroll' ? 'Give advance' : s.mod === 'customers' ? 'New credit party' : s.mod === 'suppliers' ? 'New soling supplier' : 'New entry'}
-            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : sup ? () => openNewSoling(sup.id) : cr ? () => openCrBill(cr) : s.mod === 'daybook' ? openExpense : s.mod === 'attendance' || s.mod === 'payroll' ? () => openAdvance('', '') : openAdd}
+            quickLabel={atStation ? 'Order book' : onRates ? 'Add rate period' : cr ? (cr.kind === 'bunk' ? 'Add fuel taken' : 'Add purchase bill') : s.mod === 'bunks' ? 'New fuel bunk' : s.mod === 'vendors' ? 'New spares company' : s.mod === 'daybook' ? 'Add expense' : s.mod === 'attendance' ? 'Give advance' : s.mod === 'customers' ? 'New customer' : s.mod === 'suppliers' ? 'New soling supplier' : 'New entry'}
+            onQuick={atStation ? () => go('orders') : onRates ? () => openRate(party ? party.id : '', '') : cr ? () => openCrBill(cr) : s.mod === 'attendance' ? () => openAdvance('', '') : openAdd}
           />
           <main
             className="ag-main"
@@ -1443,8 +1144,8 @@ export default function App() {
                 <div style={{ fontSize: 13, color: 'var(--color-neutral-700)', marginTop: 4 }}>Ask the owner to give you this right under Staff &amp; access.</div>
               </div>
             )}
-            {s.mod === 'access' && me.role === 'owner' && <Access db={s.db} me={me} thisDevice={devId} onSaveUser={saveUser} onDevice={setDeviceStatus} onAccessRequest={decideAccessRequest} onSettings={saveAccessSettings} />}
-            {s.mod === 'activity' && me.role === 'owner' && <Activity db={s.db} onRollback={(ids) => set({ modal: { kind: 'rollback', ids, title: 'Undo ' + ids.length + ' change(s)?', kicker: 'Activity', confirmLabel: 'Undo', message: 'The selected changes will be reversed, newest first. Anything changed by someone since is skipped. Items removed by the undo are kept in Voided entries.' } })} />}
+            {s.mod === 'access' && me.role === 'owner' && <Access db={s.db} me={me} onSaveUser={saveUser} onAccessRequest={decideAccessRequest} onSettings={saveAccessSettings} />}
+            {s.mod === 'activity' && me.role === 'owner' && <Activity db={s.db} onRollback={(ids) => set({ modal: { kind: 'rollback', ids, title: 'Undo ' + ids.length + ' change(s)?', kicker: 'Activity', confirmLabel: 'Undo', message: 'The selected changes will be reversed, newest first. Anything changed by someone since is skipped. Items removed by the undo are deleted for good.' } })} />}
             {s.mod === 'approvals' && <Approvals db={s.db} me={me} onDecide={decideApproval} />}
             {s.mod === 'dashboard' && <Dashboard d={d} tab={s.dashTab} setTab={(t) => set({ dashTab: t })} go={go} onOpenParty={openParty} onReport={(day) => openPageReport('daily', { fromDate: day, toDate: day })} />}
             {party && (
@@ -1460,7 +1161,6 @@ export default function App() {
                 onAddRate={(matId) => openRate(party.id, matId)}
                 onEndRate={askEndRate}
                 onDeleteRate={(card) => askDelete(card, 'rates')}
-                onOpenSuppliers={() => { const p = supplierOfParty(party.id); if (p) openSupplier(p.id); else go('suppliers'); }}
                 onEditLoad={(o) => openEdit(o, 'orders')}
                 onPayLoad={openTicketPay}
                 onDeleteLoad={(o) => askDelete(o, 'orders')}
@@ -1472,8 +1172,8 @@ export default function App() {
             )}
             {s.mod === 'party' && !party && (
               <div className="ag-glass" style={{ padding: 'var(--space-6)' }}>
-                <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 16 }}>This credit party no longer exists</div>
-                <button type="button" className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }} onClick={() => go('customers')}>All credit parties</button>
+                <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 16 }}>This customer no longer exists</div>
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }} onClick={() => go('customers')}>All customers</button>
               </div>
             )}
             {s.mod === 'import' && (
@@ -1481,7 +1181,6 @@ export default function App() {
                 d={d}
                 onFile={importFile}
                 onParty={choosePartyForRow}
-                onSupplier={chooseSupplierForRow}
                 onEditPay={editStagedPay}
                 onRemove={removeStaged}
                 onEdit={openStagedEdit}
@@ -1501,37 +1200,24 @@ export default function App() {
                 setWb={setWb}
                 onCapture={captureTare}
                 onWeighOut={weighOut}
+                onUpdateWeights={updateOnsiteWeights}
                 onConfirm={confirmOut}
                 onVoid={askVoid}
                 onCancel={cancelOut}
               />
             )}
-            {s.mod === 'customers' && (
-              <CreditParties d={d} onOpen={openParty} onAdd={openAdd} onReport={() => openReport('', 'statement')} />
+            {tabGroup && (
+              // Pages grouped under one sidebar item share a segmented control; each tab keeps its own content below it.
+              <div className="ag-fade" style={{ marginBottom: 'var(--space-6)' }}>
+                <Segmented
+                  label={MODS[tabGroup].label}
+                  value={s.mod}
+                  onChange={go}
+                  options={PAGE_GROUPS[tabGroup].filter((k) => canOpen(me, k)).map((k) => ({ v: k, l: TAB_LABEL[k] }))}
+                />
+              </div>
             )}
             {s.mod === 'attendance' && <Attendance d={d} P={P} onSave={saveAttendance} onAdvance={openAdvance} onReport={(date) => openPageReport('attendance', monthRange(date.slice(0, 7)))} />}
-            {s.mod === 'payroll' && (
-              <Salary
-                d={d}
-                P={P}
-                onPay={openSalaryPay}
-                onPayAll={payAllSalaries}
-                onUndo={(rec) => askDelete(rec, 'payroll')}
-                onStatement={salaryStatement}
-              />
-            )}
-            {s.mod === 'daybook' && (
-              <DayBook
-                d={d}
-                onSetOpening={openOpening}
-                onAddExpense={openExpense}
-                onEditExpense={(x) => openEdit(x, 'expenses')}
-                onDeleteExpense={(x) => askDelete(x, 'expenses')}
-                onOpenParty={openParty}
-                onOpenSupplier={openSupplier}
-              />
-            )}
-            {s.mod === 'reports' && <Reports d={d} onToast={toast} onStartFresh={openStartFresh} />}
             {s.mod === 'eb' && (
               <Electricity
                 d={d}
@@ -1567,7 +1253,6 @@ export default function App() {
                 onPay={() => openCrPay(cr)}
                 onDeletePay={(p) => askDelete(p, 'crPayments')}
                 onOpenParty={openParty}
-                onOpenSupplier={openSupplier}
                 onReport={(type, range) => openReport('', type, range, { creditorId: cr.id })}
               />
             )}
@@ -1577,42 +1262,12 @@ export default function App() {
                 <button type="button" className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }} onClick={() => go('bunks')}>Fuel bunks</button>
               </div>
             )}
-            {s.mod === 'suppliers' && (
-              <SolingSuppliers d={d} onOpen={openSupplier} onAdd={openAdd} onReport={() => openReport('', 'statement', {}, { suppliers: true })} />
-            )}
-            {sup && (
-              <SupplierDetail
-                key={sup.id}
-                showHistory={me.role === 'owner'}
-                onDeleteAccount={() => askDelete(sup, 'suppliers')}
-                d={d}
-                sup={sup}
-                tab={s.supplierTab}
-                setTab={(t) => set({ supplierTab: t })}
-                onBack={() => go('suppliers')}
-                onEdit={() => openEdit(sup, 'suppliers')}
-                onAddLoad={() => openNewSoling(sup.id)}
-                onEditLoad={(u) => openEdit(u, 'purchases')}
-                onDeleteLoad={(u) => askDelete(u, 'purchases')}
-                onPay={() => openSupPay(sup)}
-                onDeletePay={(p) => askDelete(p, 'supPayments')}
-                onOpenParty={openParty}
-                onAddRate={() => openSolRate(sup.id)}
-                onEndRate={(r) => askEndRate(r, 'solRates')}
-                onDeleteRate={(r) => askDelete(r, 'solRates')}
-                onReport={(type, range) => openReport('', type, range, { supplierId: sup.id })}
-                onAddPass={(loadIds) => openPass(sup.id, loadIds)}
-                onEditPass={(x) => openPass(sup.id, x.loadIds, x)}
-                onDeletePass={(x) => askDelete(x, 'solPasses')}
-              />
-            )}
-            {s.mod === 'supplier' && !sup && (
-              <div className="ag-glass" style={{ padding: 'var(--space-6)' }}>
-                <div style={{ fontFamily: 'var(--font-heading)', fontWeight: 800, fontSize: 16 }}>This soling supplier no longer exists</div>
-                <button type="button" className="btn btn-secondary" style={{ marginTop: 'var(--space-3)' }} onClick={() => go('suppliers')}>All soling suppliers</button>
+            {(s.mod === 'orders' || s.mod === 'purchases') && (
+              // Orders and Soling share one page; each tab keeps its own list, filters and add button.
+              <div className="ag-fade" style={{ marginBottom: 'var(--space-6)' }}>
+                <Segmented label="Orders and soling" value={s.mod} onChange={go} options={[{ v: 'orders', l: 'Orders' }, { v: 'purchases', l: 'Soling' }].filter((o) => canOpen(me, o.v))} />
               </div>
             )}
-            {s.mod === 'voids' && <VoidedEntries d={d} onRestore={restoreEntry} onReinstate={reinstate} onPurge={askPurge} />}
             {cfg && !CUSTOM_LISTS.includes(s.mod) && (
               <ListModule
                 key={s.mod}
@@ -1624,6 +1279,7 @@ export default function App() {
                 onEdit={(row) => openEdit(row)}
                 onDelete={askDelete}
                 onRowAction={onRowAction}
+                {...(s.mod === 'customers' ? { onReport: () => openReport('', 'statement'), reportLabel: 'All-customers report' } : {})}
               />
             )}
           </main>
@@ -1639,7 +1295,6 @@ export default function App() {
           bill={s.payEdit.bill}
           walkIn={s.payEdit.walkIn}
           initial={s.payEdit.initial}
-          suppliers={s.db.suppliers.filter((p) => p.status !== 'Inactive')}
           creditors={(s.db.creditors || []).filter((c) => c.status !== 'Inactive')}
           onSave={savePay}
           onClose={() => set({ payEdit: null })}

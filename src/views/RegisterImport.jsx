@@ -30,11 +30,11 @@ export function saleStatus(d, row) {
 
 export function solingStatus(row) {
   if (row.dup) return { label: 'Already imported', cls: 'ag-t-mute', ready: false };
-  if (!row.supplierId) return { label: 'Choose supplier', cls: 'ag-t-warn', ready: false };
+  if (!(+row.manualRate > 0)) return { label: 'Add rate', cls: 'ag-t-warn', ready: false };
   return { label: 'Ready', cls: 'ag-t-ok', ready: true };
 }
 
-export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditPay, onEdit, onRemove, onPostSales, onPostSoling, onClear }) {
+export default function RegisterImport({ d, onFile, onParty, onEditPay, onEdit, onRemove, onPostSales, onPostSoling, onClear }) {
   const input = useRef(null);
   const [drag, setDrag] = useState(false);
   const staging = d.db.staging || [];
@@ -47,13 +47,8 @@ export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditP
   const partyOptions = (row) => [
     ...d.db.customers.map((c) => ({ v: c.id, l: c.name })),
     { v: '__walkin', l: 'Walk-in customer (cash) — ' + row.name },
-    { v: '__new', l: '+ Add "' + row.name + '" as a credit party' },
+    { v: '__new', l: '+ Add "' + row.name + '" as a customer' },
   ];
-  const supplierOptions = (row) => [
-    ...(d.db.suppliers || []).map((p) => ({ v: p.id, l: p.name })),
-    { v: '__new', l: '+ Add "' + row.name + '" as a soling supplier' },
-  ];
-
   const pick = (files) => { if (files && files[0]) onFile(files[0]); };
   const totals = readySales.reduce((acc, r) => {
     const { bill } = rowBill(d, r);
@@ -173,14 +168,14 @@ export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditP
           className="ag-rise"
           style={{ marginTop: 'var(--space-6)' }}
           title="Soling loads (purchases)"
-          sub="Boulders bought from suppliers. Net boulders = register Net − Gross (the truck comes in loaded), valued at the supplier's rate on that date."
+          sub="Boulders bought from suppliers. Net boulders = register Net − Gross (the truck comes in loaded), valued at the rate per ton you enter for each load (Edit)."
           action={<button type="button" className="btn btn-primary" disabled={!readySoling.length} onClick={onPostSoling}>Save {readySoling.length} soling load{readySoling.length === 1 ? '' : 's'}</button>}
         >
           <div style={{ overflowX: 'auto' }}>
             <table className="table" style={{ width: '100%', minWidth: 1080 }}>
               <thead>
                 <tr>
-                  <th style={TH}>Serial</th><th style={TH}>Date / time</th><th style={TH}>Vehicle</th><th style={TH}>Register name → supplier</th>
+                  <th style={TH}>Serial</th><th style={TH}>Date / time</th><th style={TH}>Vehicle</th><th style={TH}>Supplier</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Empty (Gross)</th><th style={{ ...TH, textAlign: 'right' }}>Loaded (Net)</th><th style={{ ...TH, textAlign: 'right' }}>Boulders (t)</th>
                   <th style={{ ...TH, textAlign: 'right' }}>Rate / t</th><th style={{ ...TH, textAlign: 'right' }}>We owe</th>
                   <th style={TH}>Status</th><th style={{ ...TH, textAlign: 'right' }}>Actions</th>
@@ -189,22 +184,19 @@ export default function RegisterImport({ d, onFile, onParty, onSupplier, onEditP
               <tbody>
                 {soling.map((r) => {
                   const st = solingStatus(r);
-                  const u = { supplierId: r.supplierId, date: r.date, tare: r.gross, gross: r.net, manualRate: r.manualRate, extra: r.extra };
-                  const rate = r.supplierId ? d.solRate(u).rate : 0;
+                  const u = { date: r.date, tare: r.gross, gross: r.net, manualRate: r.manualRate, extra: r.extra };
+                  const rate = d.solRate(u).rate;
                   return (
                     <tr key={r.key}>
                       <td style={{ fontWeight: 600 }}>{r.serial}</td>
                       <td className="ag-tabular">{r.date} {r.time}</td>
                       <td className="ag-tabular">{r.vehicle}</td>
-                      <td style={{ minWidth: 230, whiteSpace: 'normal' }}>
-                        <div style={{ fontSize: 11.5, color: 'var(--color-neutral-600)', marginBottom: 4 }}>{r.name}</div>
-                        <Select label={'Supplier for ' + r.serial} value={r.supplierId} placeholder="Choose supplier…" options={supplierOptions(r)} onChange={(v) => onSupplier(r.key, v)} />
-                      </td>
+                      <td style={{ minWidth: 160, whiteSpace: 'normal', fontWeight: 600 }}>{r.name}</td>
                       <td className="ag-tabular" style={{ textAlign: 'right' }}>{r.gross.toLocaleString('en-IN')}</td>
                       <td className="ag-tabular" style={{ textAlign: 'right' }}>{r.net.toLocaleString('en-IN')}</td>
                       <td className="ag-tabular" style={{ textAlign: 'right', fontWeight: 600 }}>{T(d.net(u))}</td>
                       <td className="ag-tabular" style={{ textAlign: 'right' }}>{rate ? M(rate) : '—'}</td>
-                      <td className="ag-tabular" style={{ textAlign: 'right' }}>{rate ? M(d.solValue(u)) : r.supplierId ? 'No rate' : '—'}</td>
+                      <td className="ag-tabular" style={{ textAlign: 'right' }}>{rate ? M(d.solValue(u)) : 'No rate'}</td>
                       <td><Tag cls={st.cls}>{st.label}</Tag></td>
                       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <button type="button" className="btn btn-ghost" onClick={() => onEdit(r.key)}>Edit</button>

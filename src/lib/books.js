@@ -32,18 +32,14 @@ function movements(d) {
       date: p.date, time: p.time || '', who: payer(p), mode: p.method, amount: p.amount, ref: p.ref || '', remarks: p.remarks || '',
       what: t ? 'Load ' + t.ticket : 'Receipt on account', src: 'payments', rec: p,
     };
-    if (!p.toType || p.toType === 'company') flows.push({ ...row, dir: 'in', kind: p.custId ? 'Credit party' : 'Walk-in' });
-    else direct.push({ ...row, to: p.toType === 'supplier' ? d.supplier(p.supplierId).name + ' (soling)' : p.toType === 'creditor' ? d.creditorName(p.creditorId) : (p.toName || 'Someone else') });
+    if (!p.toType || p.toType === 'company') flows.push({ ...row, dir: 'in', kind: p.custId ? 'Customer' : 'Walk-in' });
+    else direct.push({ ...row, to: p.toType === 'creditor' ? d.creditorName(p.creditorId) : (p.toName || 'Someone else') });
   });
 
   // Older loads marked paid without payment records count as paid on the load's date.
   D.orders.forEach((o) => {
     if (o.status === 'Void' || d.paymentsFor(o.id).length || !isPaidMethod(o.method)) return;
-    flows.push({ date: o.date, time: o.time || '', who: d.partyLabel(o), mode: o.method, amount: d.billTotal(o), ref: '', remarks: '', what: 'Load ' + o.ticket, dir: 'in', kind: o.custId ? 'Credit party' : 'Walk-in', src: 'orders', rec: o });
-  });
-
-  (D.supPayments || []).forEach((p) => {
-    flows.push({ date: p.date, time: p.time || '', who: d.supplier(p.supplierId).name, mode: p.method, amount: p.amount, ref: p.ref || '', remarks: p.remarks || '', what: 'Paid to soling supplier', dir: 'out', kind: 'Soling supplier', src: 'supPayments', rec: p });
+    flows.push({ date: o.date, time: o.time || '', who: d.partyLabel(o), mode: o.method, amount: d.billTotal(o), ref: '', remarks: '', what: 'Load ' + o.ticket, dir: 'in', kind: o.custId ? 'Customer' : 'Walk-in', src: 'orders', rec: o });
   });
 
   (D.crPayments || []).forEach((p) => {
@@ -117,21 +113,12 @@ export function solingSummary(d, from, to) {
   const loads = (d.db.purchases || []).filter((u) => inRange(u.date, from, to));
   const bySup = {};
   loads.forEach((u) => {
-    const g = bySup[u.supplierId] || (bySup[u.supplierId] = { name: d.supplier(u.supplierId).name, loads: 0, tons: 0, value: 0, paid: 0 });
+    const name = u.supplierName || 'Not named';
+    const g = bySup[name] || (bySup[name] = { name, loads: 0, tons: 0, value: 0 });
     g.loads += 1; g.tons += d.net(u); g.value += d.solValue(u);
   });
-  (d.db.suppliers || []).forEach((p) => {
-    const paid = d.supplierPaysOf(p.id).filter((x) => inRange(x.p.date, from, to)).reduce((s, x) => s + x.p.amount, 0);
-    if (!paid) return;
-    (bySup[p.id] || (bySup[p.id] = { name: p.name, loads: 0, tons: 0, value: 0, paid: 0 })).paid += paid;
-  });
-  (d.db.solPasses || []).filter((x) => inRange(x.date, from, to)).forEach((x) => {
-    const g = bySup[x.supplierId] || (bySup[x.supplierId] = { name: d.supplier(x.supplierId).name, loads: 0, tons: 0, value: 0, paid: 0 });
-    g.value += +x.amount || 0;
-  });
-  const passes = (d.db.solPasses || []).filter((x) => inRange(x.date, from, to)).reduce((s, x) => s + (+x.amount || 0), 0);
   const list = Object.values(bySup).sort((a, b) => b.value - a.value);
-  return { passes, loads, bySup: list, tons: loads.reduce((s, u) => s + d.net(u), 0), value: loads.reduce((s, u) => s + d.solValue(u), 0) + passes, paid: list.reduce((s, g) => s + g.paid, 0) };
+  return { loads, bySup: list, tons: loads.reduce((s, u) => s + d.net(u), 0), value: loads.reduce((s, u) => s + d.solValue(u), 0) };
 }
 
 export function expenseSummary(d, from, to) {
